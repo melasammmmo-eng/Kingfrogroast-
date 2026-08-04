@@ -1,24 +1,4 @@
-Here is the updated code with the features you requested:
 
-1. **Dynamic Tone:** Updated system prompt and logic so the bot checks whether the user is being nice or mean, adjusting its attitude accordingly.
-2. **Owner-Only Commands:** Added `!start` and `!stop` prefix commands restricted to your specific Discord user ID defined in `.env`.
-
-### Step 1: Add to your `.env` file
-
-Add your Discord user ID to your `.env` file:
-
-```env
-OWNER_ID=123456789012345678
-
-```
-
-*(Replace `123456789012345678` with your actual Discord User ID).*
-
----
-
-### Step 2: Updated Python Code
-
-```python
 import os
 import random
 import json
