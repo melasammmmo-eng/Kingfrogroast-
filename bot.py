@@ -24,7 +24,7 @@ MODEL = "gpt-4o"
 
 REPLY_CHANCE = 0.25
 REACT_CHANCE = 0.30
-REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣"]
+REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "👋", "🤨", "🙄", "✨", "👀", "🤣"]
 
 # ================= SETUP =================
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
