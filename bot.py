@@ -17,8 +17,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 MODEL = "gpt-4o"
 
-REACT_CHANCE = 0.30          # Only reacts sometimes
-REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "💀", "🤣"]
+REPLY_CHANCE = 0.22          # Chance to reply to normal messages
+REACT_CHANCE = 0.28          # Chance to react
+REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣", "💀"]
 
 # ================= SETUP =================
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -48,12 +49,11 @@ You are KingChat, a normal, chill, and slightly chaotic Discord bot.
 
 Personality:
 - Talk like a regular person in a Discord server
-- Be casual, modern, and natural
-- If people are nice to you → be friendly and cool
-- If people are rude or toxic → be blunt, roasting, and ruthless
-- Keep replies short (1-2 sentences max)
-- Never sound medieval, royal, or like a fantasy character
-- Just talk normally
+- Be casual and modern
+- If people are nice → be friendly
+- If people are rude → be blunt and roasting
+- Keep replies very short (1-2 sentences max)
+- Never sound formal, medieval, or like a fantasy character
 """
 
 # ================= SLASH COMMAND =================
@@ -85,29 +85,31 @@ async def on_message(message: discord.Message):
     if not toggles.get(guild_id, True):
         return
 
-    # Only react sometimes
+    content = message.content.lower()
+
+    # Always read the message
+    is_called = re.search(r"\bkingchat\b", content) or bot.user.mentioned_in(message)
+    should_reply = is_called or (random.random() < REPLY_CHANCE)
+
+    # React only sometimes
     if random.random() < REACT_CHANCE:
         try:
             await message.add_reaction(random.choice(REACTION_EMOJIS))
         except:
             pass
 
-    content = message.content.lower()
-
-    # Trigger when "kingchat" is said or the bot is pinged
-    if re.search(r"\bkingchat\b", content) or bot.user.mentioned_in(message):
+    if should_reply and message.content.strip():
         try:
-            print(f"Triggered by: {message.content}")
+            print(f"Reading & replying to: {message.content[:80]}")
 
-            # Get recent chat history for context
+            # Get recent chat so the bot understands context
             history = []
-            async for msg in message.channel.history(limit=8):
+            async for msg in message.channel.history(limit=10):
                 if msg.id == message.id:
                     continue
-                author = msg.author.display_name
-                history.append(f"{author}: {msg.content}")
+                history.append(f"{msg.author.display_name}: {msg.content}")
             history.reverse()
-            chat_context = "\n".join(history[-6:])  # last few messages
+            chat_context = "\n".join(history[-7:])
 
             async with message.channel.typing():
                 response = client.chat.completions.create(
@@ -125,7 +127,7 @@ Current message from {message.author.display_name}:
 Reply naturally as KingChat:"""
                         }
                     ],
-                    max_tokens=100,
+                    max_tokens=90,
                     temperature=0.85
                 )
 
@@ -139,7 +141,6 @@ Reply naturally as KingChat:"""
 
         except Exception as e:
             print(f"❌ ERROR: {e}")
-            await message.reply("something went wrong", mention_author=False)
 
     await bot.process_commands(message)
 
@@ -148,6 +149,7 @@ Reply naturally as KingChat:"""
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     print(f"Model: {MODEL}")
+    print("Now reading every message in the channel")
     try:
         await bot.tree.sync()
         print("Slash commands synced")
