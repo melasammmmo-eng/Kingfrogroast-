@@ -7,7 +7,7 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from openai import OpenAI
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,7 +15,10 @@ load_dotenv()
 # ================= CONFIG =================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+
+# Safe owner ID parsing
+owner_id_env = os.getenv("OWNER_ID", "0")
+OWNER_ID = int(owner_id_env) if owner_id_env.isdigit() else 0
 
 MODEL = "gpt-4o"
 
@@ -24,7 +27,7 @@ REACT_CHANCE = 0.30
 REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣"]
 
 # ================= SETUP =================
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -36,13 +39,20 @@ TOGGLE_FILE = "toggles.json"
 
 def load_toggles():
     if os.path.exists(TOGGLE_FILE):
-        with open(TOGGLE_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(TOGGLE_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading toggles: {e}")
+            return {}
     return {}
 
 def save_toggles(data):
-    with open(TOGGLE_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    try:
+        with open(TOGGLE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Error saving toggles: {e}")
 
 toggles = load_toggles()
 
@@ -59,7 +69,7 @@ Personality & Rules:
 - Never be racist, sexist, or attack protected characteristics.
 """
 
-# Helper function to check owner permission
+# Custom check to verify owner permission via .env
 def is_owner():
     async def predicate(ctx: commands.Context):
         return ctx.author.id == OWNER_ID
@@ -88,7 +98,7 @@ async def stop_bot(ctx: commands.Context):
 
 @start_bot.error
 @stop_bot.error
-async def owner_command_error(ctx, error):
+async def owner_command_error(ctx: commands.Context, error: Exception):
     if isinstance(error, commands.CheckFailure):
         await ctx.reply("❌ Only the bot owner can use this command.")
 
@@ -105,7 +115,7 @@ async def toggle(interaction: discord.Interaction, state: app_commands.Choice[st
         return
 
     guild_id = str(interaction.guild_id)
-    enabled = state.value == "on"
+    enabled = (state.value == "on")
     toggles[guild_id] = enabled
     save_toggles(toggles)
 
@@ -117,8 +127,10 @@ async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
 
-    # Always process bot commands first (!start, !stop, etc.)
-    await bot.process_commands(message)
+    # Process bot commands first and stop message processing if it was a command
+    if message.content.startswith("!"):
+        await bot.process_commands(message)
+        return
 
     guild_id = str(message.guild.id)
     if not toggles.get(guild_id, True):
@@ -126,14 +138,10 @@ async def on_message(message: discord.Message):
 
     content = message.content.lower()
 
-    # Ignore messages that start with the command prefix to prevent double execution
-    if content.startswith("!"):
-        return
-
     is_called = re.search(r"\bkingchat\b", content) or bot.user.mentioned_in(message)
     should_reply = is_called or (random.random() < REPLY_CHANCE)
 
-    # React only sometimes
+    # Add reaction occasionally
     if random.random() < REACT_CHANCE:
         try:
             await message.add_reaction(random.choice(REACTION_EMOJIS))
@@ -144,7 +152,7 @@ async def on_message(message: discord.Message):
         try:
             print(f"Responding to: {message.content[:80]}")
 
-            # Get recent chat for context
+            # Retrieve chat history for context
             history = []
             async for msg in message.channel.history(limit=10):
                 if msg.id == message.id:
@@ -154,7 +162,7 @@ async def on_message(message: discord.Message):
             chat_context = "\n".join(history[-7:])
 
             async with message.channel.typing():
-                response = client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model=MODEL,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
@@ -194,9 +202,7 @@ async def on_ready():
         await bot.tree.sync()
         print("Slash commands synced")
     except Exception as e:
-        print(e)
+        print(f"Sync error: {e}")
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
-
-```
