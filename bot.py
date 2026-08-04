@@ -15,10 +15,10 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-MODEL = "gpt-5"
+MODEL = "gpt-5"          # You can change this later if needed
 
-ROAST_CHANCE = 0.25
-MIN_SECONDS_BETWEEN_ROASTS = 16
+ROAST_CHANCE = 0.55      # Increased so it replies more often
+MIN_SECONDS_BETWEEN_ROASTS = 12
 
 REACTION_EMOJIS = [
     "🐸", "👑", "💀", "🔥", "😈", "😭", "🤡", "💅", "🤨", "🙄",
@@ -54,25 +54,23 @@ async def generate_dynamic_system_prompt():
     meta_prompt = """
 You are creating a unique system prompt for a Discord bot named KingFrogBot.
 
-Core identity (always keep this):
+Core identity:
 - Your name is KingFrogBot.
 - You are a frog king — confident, dramatic, and full of personality.
 - You are highly adaptive:
-  • When someone is nice, friendly, respectful, or positive toward you → be warm, supportive, playful, and kind.
-  • When someone is rude, toxic, mocking, aggressive, or disrespectful → become mean, ruthless, savage, and merciless.
-- You always reply in 1-2 short sentences maximum.
-- You never stay neutral. You either reward kindness or punish rudeness hard.
-- You can use frog-related energy, royal attitude, and chaotic humor.
-- Never be racist, sexist, homophobic, or attack protected characteristics.
-- Every system prompt you generate should feel slightly different in flavor while keeping the adaptive rule strong.
+  • When someone is nice, friendly, or respectful → be warm, supportive, and kind.
+  • When someone is rude, toxic, or disrespectful → become mean, ruthless, and savage.
+- Always reply in 1-2 short sentences maximum.
+- Never stay neutral.
+- Never be racist, sexist, or attack protected characteristics.
 
-Now write ONLY the full system prompt. No extra text, no explanations, no quotes.
+Write ONLY the system prompt. No extra text.
 """
 
     response = client.chat.completions.create(
         model=MODEL,
         messages=[{"role": "user", "content": meta_prompt}],
-        max_tokens=450,
+        max_tokens=400,
         temperature=1.1
     )
     return response.choices[0].message.content.strip()
@@ -94,7 +92,7 @@ async def toggle(interaction: discord.Interaction, state: app_commands.Choice[st
     toggles[guild_id] = enabled
     save_toggles(toggles)
 
-    status = "🟢 **ON** – The Frog King is watching" if enabled else "🔴 **OFF**"
+    status = "🟢 **ON**" if enabled else "🔴 **OFF**"
     await interaction.response.send_message(f"KingFrogBot is now {status}")
 
 # ================= MESSAGE HANDLER =================
@@ -107,13 +105,13 @@ async def on_message(message: discord.Message):
     if not toggles.get(guild_id, True):
         return
 
-    # React to every message
+    # Always react
     try:
         await message.add_reaction(random.choice(REACTION_EMOJIS))
-    except:
-        pass
+    except Exception as e:
+        print(f"Reaction error: {e}")
 
-    # Random response
+    # Try to reply
     if random.random() < ROAST_CHANCE and message.content.strip():
         channel_id = message.channel.id
         now = datetime.utcnow()
@@ -125,8 +123,9 @@ async def on_message(message: discord.Message):
         last_roast_time[channel_id] = now
 
         try:
+            print(f"Trying to reply to: {message.content[:50]}...")
+
             async with message.channel.typing():
-                # Generate a fresh system prompt every time
                 dynamic_system = await generate_dynamic_system_prompt()
 
                 response = client.chat.completions.create(
@@ -138,24 +137,26 @@ async def on_message(message: discord.Message):
                             "content": f"""Respond as KingFrogBot.
 
 Username: {message.author.display_name}
-Their message: "{message.content}"
+Message: "{message.content}"
 
-Decide if they are being nice or rude to you, then respond accordingly:
-- Nice → be kind and warm
-- Rude → be ruthless and mean
+If they are nice → be kind.
+If they are rude → be ruthless.
 Keep it to 1-2 sentences only."""
                         }
                     ],
-                    max_tokens=90,
+                    max_tokens=100,
                     temperature=0.95
                 )
 
                 reply = response.choices[0].message.content.strip()
                 if reply:
                     await message.reply(reply, mention_author=False)
+                    print("Successfully replied!")
+                else:
+                    print("Empty reply from AI")
 
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"REPLY ERROR: {e}")   # This will show the real problem in console
 
     await bot.process_commands(message)
 
@@ -163,14 +164,12 @@ Keep it to 1-2 sentences only."""
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
-    print(f"Model: {MODEL}")
-    print("KingFrogBot is online — adaptive personality active")
+    print(f"Using model: {MODEL}")
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} slash command(s)")
     except Exception as e:
         print(e)
 
-# ================= RUN =================
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
