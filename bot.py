@@ -1,7 +1,7 @@
 import os
 import random
 import json
-from datetime import datetime, timedelta
+import re
 
 import discord
 from discord import app_commands
@@ -15,10 +15,7 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-MODEL = "gpt-4o"          # Changed to a more reliable model (change later if you want)
-
-REPLY_CHANCE = 0.65       # High chance so it actually types
-MIN_SECONDS_BETWEEN_REPLIES = 8
+MODEL = "gpt-4o"
 
 REACTION_EMOJIS = ["🐸", "👑", "💀", "🔥", "😈", "😭", "🤡", "💅", "🤨", "🙄", "💥", "✨"]
 
@@ -44,18 +41,13 @@ def save_toggles(data):
         json.dump(data, f, indent=2)
 
 toggles = load_toggles()
-last_reply_time = {}
 
-# ================= FIXED PERSONALITY =================
 SYSTEM_PROMPT = """
-You are KingFrogBot, a confident and dramatic frog king.
+You are KingFrogBot (also called KingChat), a confident frog king.
 
-Personality rules:
-- If the person is nice, friendly, or respectful → be warm, kind, supportive and playful.
-- If the person is rude, toxic, mocking or disrespectful → be mean, ruthless, savage and roasting.
+- If the person is nice → be friendly and kind.
+- If the person is rude → be mean and ruthless.
 - Always reply in 1-2 short sentences only.
-- Never be racist, sexist, or attack protected characteristics.
-- Stay in character as a frog king.
 """
 
 # ================= SLASH COMMAND =================
@@ -75,8 +67,7 @@ async def toggle(interaction: discord.Interaction, state: app_commands.Choice[st
     toggles[guild_id] = enabled
     save_toggles(toggles)
 
-    status = "🟢 ON" if enabled else "🔴 OFF"
-    await interaction.response.send_message(f"KingFrogBot is now {status}")
+    await interaction.response.send_message(f"KingFrogBot is now {'🟢 ON' if enabled else '🔴 OFF'}")
 
 # ================= MESSAGE HANDLER =================
 @bot.event
@@ -94,19 +85,12 @@ async def on_message(message: discord.Message):
     except:
         pass
 
-    # Reply logic
-    if random.random() < REPLY_CHANCE and message.content.strip():
-        channel_id = message.channel.id
-        now = datetime.utcnow()
+    content = message.content.lower()
 
-        last = last_reply_time.get(channel_id)
-        if last and (now - last) < timedelta(seconds=MIN_SECONDS_BETWEEN_REPLIES):
-            return
-
-        last_reply_time[channel_id] = now
-
+    # Reply if "kingchat" appears anywhere in the sentence
+    if re.search(r"\bkingchat\b", content) or bot.user.mentioned_in(message):
         try:
-            print(f"Generating reply for: {message.content[:60]}")
+            print(f"Triggered by message: {message.content}")
 
             async with message.channel.typing():
                 response = client.chat.completions.create(
@@ -115,10 +99,10 @@ async def on_message(message: discord.Message):
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {
                             "role": "user",
-                            "content": f"Username: {message.author.display_name}\nMessage: {message.content}\n\nReply as KingFrogBot:"
+                            "content": f"{message.author.display_name} said: {message.content}\n\nReply as KingFrogBot:"
                         }
                     ],
-                    max_tokens=100,
+                    max_tokens=80,
                     temperature=0.9
                 )
 
@@ -126,12 +110,13 @@ async def on_message(message: discord.Message):
 
                 if reply:
                     await message.reply(reply, mention_author=False)
-                    print("✅ Successfully sent reply")
+                    print("✅ Reply sent")
                 else:
-                    print("⚠️ AI returned empty reply")
+                    await message.reply("The frog king has nothing to say right now.", mention_author=False)
 
         except Exception as e:
-            print(f"❌ ERROR WHILE REPLYING: {e}")
+            print(f"❌ ERROR: {e}")
+            await message.reply("Something went wrong in the swamp 🐸", mention_author=False)
 
     await bot.process_commands(message)
 
@@ -139,10 +124,10 @@ async def on_message(message: discord.Message):
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
-    print(f"Using model: {MODEL}")
+    print(f"Model: {MODEL}")
     try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} slash command(s)")
+        await bot.tree.sync()
+        print("Slash commands synced")
     except Exception as e:
         print(e)
 
