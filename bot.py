@@ -9,6 +9,7 @@ from collections import defaultdict, deque
 import discord
 from discord import app_commands
 from discord.ext import commands
+import aiohttp
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
@@ -27,11 +28,11 @@ REPLY_CHANCE = 0.25
 REACT_CHANCE = 0.30
 REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "👋", "🤨", "🙄", "✨", "👀", "🤣"]
 
-# Image paths for AI moods
-AVATAR_PATHS = {
-    "FRIENDLY": "avatars/happy.png",
-    "SAVAGE": "avatars/savage.png",
-    "NEUTRAL": "avatars/neutral.png"
+# ⚠️ Replace these URLs with permanent image links (e.g., Imgur, Catbox, etc.)
+AVATAR_URLS = {
+    "FRIENDLY": "https://cdn.discordapp.com/attachments/1501761242438701168/1534282802613452991/IMG_0996.png?ex=6a738fb5&is=6a723e35&hm=eca90162deafbec93ea285fe13c83ace78f8e9a34abc9911eeed91ad1e179f60&",
+    "SAVAGE": "https://cdn.discordapp.com/attachments/1501761242438701168/1534286169230282842/IMG_0993.png?ex=6a7392d8&is=6a724158&hm=2387aaa017596a1d7f65eab893eecba8ea455198117cddd3eb05a1d838879089&",
+    "NEUTRAL": "https://cdn.discordapp.com/attachments/1501761242438701168/1534286352051339274/IMG_0998.png?ex=6a739303&is=6a724183&hm=5d19794e41046cf20e8e46ae7bab40ea0fed0eb13ce2cf01c810041c40f04047&"
 }
 
 current_mood = None 
@@ -87,20 +88,21 @@ REPLY: [Your actual reply here]
 
 async def update_avatar_for_mood(mood: str):
     global current_mood
-    if mood == current_mood or mood not in AVATAR_PATHS:
+    if mood == current_mood or mood not in AVATAR_URLS:
         return
 
-    filepath = AVATAR_PATHS[mood]
-    if not os.path.exists(filepath):
-        print(f"⚠️ Avatar image for '{mood}' not found at path: {filepath}")
-        return
+    url = AVATAR_URLS[mood]
 
     try:
-        with open(filepath, "rb") as image_file:
-            avatar_bytes = image_file.read()
-            await bot.user.edit(avatar=avatar_bytes)
-            current_mood = mood
-            print(f"🖼️ Updated profile picture to match mood: {mood}")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    avatar_bytes = await resp.read()
+                    await bot.user.edit(avatar=avatar_bytes)
+                    current_mood = mood
+                    print(f"🖼️ Updated profile picture to match mood: {mood}")
+                else:
+                    print(f"⚠️ Failed to download avatar from URL: HTTP {resp.status}")
     except discord.HTTPException as e:
         print(f"⚠️ Discord avatar rate limit or HTTP error: {e}")
     except Exception as e:
