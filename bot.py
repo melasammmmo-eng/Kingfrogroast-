@@ -17,8 +17,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 MODEL = "gpt-4o"
 
-REPLY_CHANCE = 0.22          # Chance to reply to normal messages
-REACT_CHANCE = 0.28          # Chance to react
+REPLY_CHANCE = 0.25
+REACT_CHANCE = 0.30
 REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣", "💀"]
 
 # ================= SETUP =================
@@ -45,15 +45,16 @@ def save_toggles(data):
 toggles = load_toggles()
 
 SYSTEM_PROMPT = """
-You are KingChat, a normal, chill, and slightly chaotic Discord bot.
+You are KingChat, a chaotic and ruthless Discord roasting bot.
 
 Personality:
-- Talk like a regular person in a Discord server
-- Be casual and modern
-- If people are nice → be friendly
-- If people are rude → be blunt and roasting
-- Keep replies very short (1-2 sentences max)
-- Never sound formal, medieval, or like a fantasy character
+- Your main job is to roast people.
+- Be blunt, savage, and funny.
+- If someone is nice to you, you can be slightly nicer, but still keep some attitude.
+- If someone is rude, mid, cringe, or boring → destroy them.
+- Keep every reply short (1-2 sentences max).
+- Talk like a real person in Discord, not like an AI or a fantasy character.
+- Never be racist, sexist, or attack protected characteristics.
 """
 
 # ================= SLASH COMMAND =================
@@ -87,7 +88,6 @@ async def on_message(message: discord.Message):
 
     content = message.content.lower()
 
-    # Always read the message
     is_called = re.search(r"\bkingchat\b", content) or bot.user.mentioned_in(message)
     should_reply = is_called or (random.random() < REPLY_CHANCE)
 
@@ -100,9 +100,9 @@ async def on_message(message: discord.Message):
 
     if should_reply and message.content.strip():
         try:
-            print(f"Reading & replying to: {message.content[:80]}")
+            print(f"Roasting: {message.content[:80]}")
 
-            # Get recent chat so the bot understands context
+            # Get recent chat for context
             history = []
             async for msg in message.channel.history(limit=10):
                 if msg.id == message.id:
@@ -124,20 +124,20 @@ async def on_message(message: discord.Message):
 Current message from {message.author.display_name}:
 {message.content}
 
-Reply naturally as KingChat:"""
+Roast them (or reply with attitude):"""
                         }
                     ],
                     max_tokens=90,
-                    temperature=0.85
+                    temperature=0.9
                 )
 
                 reply = response.choices[0].message.content.strip()
 
                 if reply:
                     await message.reply(reply, mention_author=False)
-                    print("✅ Reply sent")
+                    print("✅ Roast sent")
                 else:
-                    await message.reply("yeah?", mention_author=False)
+                    await message.reply("mid message tbh", mention_author=False)
 
         except Exception as e:
             print(f"❌ ERROR: {e}")
@@ -149,7 +149,7 @@ Reply naturally as KingChat:"""
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     print(f"Model: {MODEL}")
-    print("Now reading every message in the channel")
+    print("Roasting mode active")
     try:
         await bot.tree.sync()
         print("Slash commands synced")
