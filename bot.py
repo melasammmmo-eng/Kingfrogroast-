@@ -17,7 +17,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 MODEL = "gpt-4o"
 
-REACTION_EMOJIS = ["🐸", "👑", "💀", "🔥", "😈", "😭", "🤡", "💅", "🤨", "🙄", "💥", "✨"]
+REACT_CHANCE = 0.30          # Only reacts sometimes
+REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "💀", "🤣"]
 
 # ================= SETUP =================
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -43,15 +44,20 @@ def save_toggles(data):
 toggles = load_toggles()
 
 SYSTEM_PROMPT = """
-You are KingFrogBot (also called KingChat), a confident frog king.
+You are KingChat, a normal, chill, and slightly chaotic Discord bot.
 
-- If the person is nice → be friendly and kind.
-- If the person is rude → be mean and ruthless.
-- Always reply in 1-2 short sentences only.
+Personality:
+- Talk like a regular person in a Discord server
+- Be casual, modern, and natural
+- If people are nice to you → be friendly and cool
+- If people are rude or toxic → be blunt, roasting, and ruthless
+- Keep replies short (1-2 sentences max)
+- Never sound medieval, royal, or like a fantasy character
+- Just talk normally
 """
 
 # ================= SLASH COMMAND =================
-@bot.tree.command(name="toggle", description="Turn KingFrogBot on or off")
+@bot.tree.command(name="toggle", description="Turn KingChat on or off")
 @app_commands.describe(state="on or off")
 @app_commands.choices(state=[
     app_commands.Choice(name="on", value="on"),
@@ -67,7 +73,7 @@ async def toggle(interaction: discord.Interaction, state: app_commands.Choice[st
     toggles[guild_id] = enabled
     save_toggles(toggles)
 
-    await interaction.response.send_message(f"KingFrogBot is now {'🟢 ON' if enabled else '🔴 OFF'}")
+    await interaction.response.send_message(f"KingChat is now {'🟢 ON' if enabled else '🔴 OFF'}")
 
 # ================= MESSAGE HANDLER =================
 @bot.event
@@ -79,18 +85,29 @@ async def on_message(message: discord.Message):
     if not toggles.get(guild_id, True):
         return
 
-    # Always react
-    try:
-        await message.add_reaction(random.choice(REACTION_EMOJIS))
-    except:
-        pass
+    # Only react sometimes
+    if random.random() < REACT_CHANCE:
+        try:
+            await message.add_reaction(random.choice(REACTION_EMOJIS))
+        except:
+            pass
 
     content = message.content.lower()
 
-    # Reply if "kingchat" appears anywhere in the sentence
+    # Trigger when "kingchat" is said or the bot is pinged
     if re.search(r"\bkingchat\b", content) or bot.user.mentioned_in(message):
         try:
-            print(f"Triggered by message: {message.content}")
+            print(f"Triggered by: {message.content}")
+
+            # Get recent chat history for context
+            history = []
+            async for msg in message.channel.history(limit=8):
+                if msg.id == message.id:
+                    continue
+                author = msg.author.display_name
+                history.append(f"{author}: {msg.content}")
+            history.reverse()
+            chat_context = "\n".join(history[-6:])  # last few messages
 
             async with message.channel.typing():
                 response = client.chat.completions.create(
@@ -99,11 +116,17 @@ async def on_message(message: discord.Message):
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {
                             "role": "user",
-                            "content": f"{message.author.display_name} said: {message.content}\n\nReply as KingFrogBot:"
+                            "content": f"""Recent chat:
+{chat_context}
+
+Current message from {message.author.display_name}:
+{message.content}
+
+Reply naturally as KingChat:"""
                         }
                     ],
-                    max_tokens=80,
-                    temperature=0.9
+                    max_tokens=100,
+                    temperature=0.85
                 )
 
                 reply = response.choices[0].message.content.strip()
@@ -112,11 +135,11 @@ async def on_message(message: discord.Message):
                     await message.reply(reply, mention_author=False)
                     print("✅ Reply sent")
                 else:
-                    await message.reply("The frog king has nothing to say right now.", mention_author=False)
+                    await message.reply("yeah?", mention_author=False)
 
         except Exception as e:
             print(f"❌ ERROR: {e}")
-            await message.reply("Something went wrong in the swamp 🐸", mention_author=False)
+            await message.reply("something went wrong", mention_author=False)
 
     await bot.process_commands(message)
 
