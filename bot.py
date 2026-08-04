@@ -15,15 +15,12 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-MODEL = "gpt-5"          # You can change this later if needed
+MODEL = "gpt-4o"          # Changed to a more reliable model (change later if you want)
 
-ROAST_CHANCE = 0.55      # Increased so it replies more often
-MIN_SECONDS_BETWEEN_ROASTS = 12
+REPLY_CHANCE = 0.65       # High chance so it actually types
+MIN_SECONDS_BETWEEN_REPLIES = 8
 
-REACTION_EMOJIS = [
-    "🐸", "👑", "💀", "🔥", "😈", "😭", "🤡", "💅", "🤨", "🙄",
-    "💥", "🤢", "🤮", "🥱", "✨", "🐸", "👑"
-]
+REACTION_EMOJIS = ["🐸", "👑", "💀", "🔥", "😈", "😭", "🤡", "💅", "🤨", "🙄", "💥", "✨"]
 
 # ================= SETUP =================
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -47,33 +44,19 @@ def save_toggles(data):
         json.dump(data, f, indent=2)
 
 toggles = load_toggles()
-last_roast_time = {}
+last_reply_time = {}
 
-# ================= AI PERSONALITY =================
-async def generate_dynamic_system_prompt():
-    meta_prompt = """
-You are creating a unique system prompt for a Discord bot named KingFrogBot.
+# ================= FIXED PERSONALITY =================
+SYSTEM_PROMPT = """
+You are KingFrogBot, a confident and dramatic frog king.
 
-Core identity:
-- Your name is KingFrogBot.
-- You are a frog king — confident, dramatic, and full of personality.
-- You are highly adaptive:
-  • When someone is nice, friendly, or respectful → be warm, supportive, and kind.
-  • When someone is rude, toxic, or disrespectful → become mean, ruthless, and savage.
-- Always reply in 1-2 short sentences maximum.
-- Never stay neutral.
+Personality rules:
+- If the person is nice, friendly, or respectful → be warm, kind, supportive and playful.
+- If the person is rude, toxic, mocking or disrespectful → be mean, ruthless, savage and roasting.
+- Always reply in 1-2 short sentences only.
 - Never be racist, sexist, or attack protected characteristics.
-
-Write ONLY the system prompt. No extra text.
+- Stay in character as a frog king.
 """
-
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=[{"role": "user", "content": meta_prompt}],
-        max_tokens=400,
-        temperature=1.1
-    )
-    return response.choices[0].message.content.strip()
 
 # ================= SLASH COMMAND =================
 @bot.tree.command(name="toggle", description="Turn KingFrogBot on or off")
@@ -84,7 +67,7 @@ Write ONLY the system prompt. No extra text.
 ])
 async def toggle(interaction: discord.Interaction, state: app_commands.Choice[str]):
     if not interaction.user.guild_permissions.manage_guild:
-        await interaction.response.send_message("You need **Manage Server** permission.", ephemeral=True)
+        await interaction.response.send_message("You need Manage Server permission.", ephemeral=True)
         return
 
     guild_id = str(interaction.guild_id)
@@ -92,7 +75,7 @@ async def toggle(interaction: discord.Interaction, state: app_commands.Choice[st
     toggles[guild_id] = enabled
     save_toggles(toggles)
 
-    status = "🟢 **ON**" if enabled else "🔴 **OFF**"
+    status = "🟢 ON" if enabled else "🔴 OFF"
     await interaction.response.send_message(f"KingFrogBot is now {status}")
 
 # ================= MESSAGE HANDLER =================
@@ -108,62 +91,54 @@ async def on_message(message: discord.Message):
     # Always react
     try:
         await message.add_reaction(random.choice(REACTION_EMOJIS))
-    except Exception as e:
-        print(f"Reaction error: {e}")
+    except:
+        pass
 
-    # Try to reply
-    if random.random() < ROAST_CHANCE and message.content.strip():
+    # Reply logic
+    if random.random() < REPLY_CHANCE and message.content.strip():
         channel_id = message.channel.id
         now = datetime.utcnow()
 
-        last = last_roast_time.get(channel_id)
-        if last and (now - last) < timedelta(seconds=MIN_SECONDS_BETWEEN_ROASTS):
+        last = last_reply_time.get(channel_id)
+        if last and (now - last) < timedelta(seconds=MIN_SECONDS_BETWEEN_REPLIES):
             return
 
-        last_roast_time[channel_id] = now
+        last_reply_time[channel_id] = now
 
         try:
-            print(f"Trying to reply to: {message.content[:50]}...")
+            print(f"Generating reply for: {message.content[:60]}")
 
             async with message.channel.typing():
-                dynamic_system = await generate_dynamic_system_prompt()
-
                 response = client.chat.completions.create(
                     model=MODEL,
                     messages=[
-                        {"role": "system", "content": dynamic_system},
+                        {"role": "system", "content": SYSTEM_PROMPT},
                         {
                             "role": "user",
-                            "content": f"""Respond as KingFrogBot.
-
-Username: {message.author.display_name}
-Message: "{message.content}"
-
-If they are nice → be kind.
-If they are rude → be ruthless.
-Keep it to 1-2 sentences only."""
+                            "content": f"Username: {message.author.display_name}\nMessage: {message.content}\n\nReply as KingFrogBot:"
                         }
                     ],
                     max_tokens=100,
-                    temperature=0.95
+                    temperature=0.9
                 )
 
                 reply = response.choices[0].message.content.strip()
+
                 if reply:
                     await message.reply(reply, mention_author=False)
-                    print("Successfully replied!")
+                    print("✅ Successfully sent reply")
                 else:
-                    print("Empty reply from AI")
+                    print("⚠️ AI returned empty reply")
 
         except Exception as e:
-            print(f"REPLY ERROR: {e}")   # This will show the real problem in console
+            print(f"❌ ERROR WHILE REPLYING: {e}")
 
     await bot.process_commands(message)
 
 # ================= READY =================
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
+    print(f"✅ Logged in as {bot.user}")
     print(f"Using model: {MODEL}")
     try:
         synced = await bot.tree.sync()
