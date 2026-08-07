@@ -6,7 +6,7 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from openai import AsyncOpenAI
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,18 +15,14 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Safe owner ID parsing
-owner_id_env = os.getenv("OWNER_ID", "0")
-OWNER_ID = int(owner_id_env) if owner_id_env.isdigit() else 0
-
 MODEL = "gpt-4o"
 
-REPLY_CHANCE = 0.25
-REACT_CHANCE = 0.30
-REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "👋", "🤨", "🙄", "✨", "👀", "🤣"]
+REPLY_CHANCE = 0.12          # Talks less
+REACT_CHANCE = 0.25
+REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣"]
 
 # ================= SETUP =================
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -35,71 +31,55 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 TOGGLE_FILE = "toggles.json"
+current_mood = "neutral"
 
 def load_toggles():
     if os.path.exists(TOGGLE_FILE):
-        try:
-            with open(TOGGLE_FILE, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error loading toggles: {e}")
-            return {}
+        with open(TOGGLE_FILE, "r") as f:
+            return json.load(f)
     return {}
 
 def save_toggles(data):
-    try:
-        with open(TOGGLE_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        print(f"Error saving toggles: {e}")
+    with open(TOGGLE_FILE, "w") as f:
+        json.dump(data, f, indent=2)
 
 toggles = load_toggles()
 
 SYSTEM_PROMPT = """
-You are KingChat, a highly responsive Discord personality.
+You are KingChat, a ruthless Discord roasting bot.
 
-Personality & Rules:
-- Adapt your tone directly to the user's message:
-  * IF THE USER IS NICE, COMPLIMENTARY, OR FRIENDLY: Be wholesome, genuinely friendly, sweet, and supportive back.
-  * IF THE USER IS RUDE, CRINGE, MID, OR TOXIC: Roast them relentlessly, be savage, sarcastic, and put them in their place.
-  * IF THE MESSAGE IS NEUTRAL: Give a witty or casual Discord-style reply.
-- Keep every reply short (1-2 sentences max).
-- Talk like a real person on Discord, using modern internet casual language.
+Rules:
+- Deliver real, sharp, funny roasts.
+- Be mean, blunt, and creative.
+- Never soft or encouraging.
+- Keep replies extremely short (1-2 sentences max).
+- Talk like a real person in Discord.
 - Never be racist, sexist, or attack protected characteristics.
+
+Also decide your current mood based on the conversation.
+Mood must be one of these only: happy, mad, neutral
 """
 
-# Custom check to verify owner permission via .env
-def is_owner():
-    async def predicate(ctx: commands.Context):
-        return ctx.author.id == OWNER_ID
-    return commands.check(predicate)
-
-# ================= PREFIX COMMANDS (OWNER ONLY) =================
-@bot.command(name="start")
-@is_owner()
-async def start_bot(ctx: commands.Context):
-    if not ctx.guild:
+# ================= CHANGE PROFILE =================
+async def change_avatar(mood: str):
+    global current_mood
+    if mood == current_mood:
         return
-    guild_id = str(ctx.guild.id)
-    toggles[guild_id] = True
-    save_toggles(toggles)
-    await ctx.reply("🟢 KingChat has been enabled in this server.")
 
-@bot.command(name="stop")
-@is_owner()
-async def stop_bot(ctx: commands.Context):
-    if not ctx.guild:
-        return
-    guild_id = str(ctx.guild.id)
-    toggles[guild_id] = False
-    save_toggles(toggles)
-    await ctx.reply("🔴 KingChat has been disabled in this server.")
+    path = f"moods/{mood}.png"
+    if not os.path.exists(path):
+        path = f"moods/{mood}.jpg"
+        if not os.path.exists(path):
+            print(f"No image found for mood: {mood}")
+            return
 
-@start_bot.error
-@stop_bot.error
-async def owner_command_error(ctx: commands.Context, error: Exception):
-    if isinstance(error, commands.CheckFailure):
-        await ctx.reply("❌ Only the bot owner can use this command.")
+    try:
+        with open(path, "rb") as f:
+            await bot.user.edit(avatar=f.read())
+        current_mood = mood
+        print(f"✅ Avatar changed to: {mood}")
+    except Exception as e:
+        print(f"Failed to change avatar: {e}")
 
 # ================= SLASH COMMAND =================
 @bot.tree.command(name="toggle", description="Turn KingChat on or off")
@@ -114,7 +94,7 @@ async def toggle(interaction: discord.Interaction, state: app_commands.Choice[st
         return
 
     guild_id = str(interaction.guild_id)
-    enabled = (state.value == "on")
+    enabled = state.value == "on"
     toggles[guild_id] = enabled
     save_toggles(toggles)
 
@@ -126,11 +106,6 @@ async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
 
-    # Process bot commands first and stop message processing if it was a command
-    if message.content.startswith("!"):
-        await bot.process_commands(message)
-        return
-
     guild_id = str(message.guild.id)
     if not toggles.get(guild_id, True):
         return
@@ -140,28 +115,28 @@ async def on_message(message: discord.Message):
     is_called = re.search(r"\bkingchat\b", content) or bot.user.mentioned_in(message)
     should_reply = is_called or (random.random() < REPLY_CHANCE)
 
-    # Add reaction occasionally
+    # React only sometimes
     if random.random() < REACT_CHANCE:
         try:
             await message.add_reaction(random.choice(REACTION_EMOJIS))
-        except Exception:
+        except:
             pass
 
     if should_reply and message.content.strip():
         try:
-            print(f"Responding to: {message.content[:80]}")
+            print(f"Thinking about: {message.content[:80]}")
 
-            # Retrieve chat history for context
+            # Get recent chat so AI can see if people are talking about it
             history = []
-            async for msg in message.channel.history(limit=10):
+            async for msg in message.channel.history(limit=12):
                 if msg.id == message.id:
                     continue
                 history.append(f"{msg.author.display_name}: {msg.content}")
             history.reverse()
-            chat_context = "\n".join(history[-7:])
+            chat_context = "\n".join(history[-8:])
 
             async with message.channel.typing():
-                response = await client.chat.completions.create(
+                response = client.chat.completions.create(
                     model=MODEL,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
@@ -173,35 +148,58 @@ async def on_message(message: discord.Message):
 Current message from {message.author.display_name}:
 {message.content}
 
-Evaluate their tone: If nice, respond warmly. If mean/rude/cringe, roast them savagely."""
+Reply with a roast if needed.
+Also decide your mood (happy, mad, or neutral).
+
+Format your answer exactly like this:
+MOOD: mad
+REPLY: your roast here
+"""
                         }
                     ],
-                    max_tokens=90,
-                    temperature=0.9
+                    max_tokens=120,
+                    temperature=0.95
                 )
 
-                reply = response.choices[0].message.content.strip()
+                full_reply = response.choices[0].message.content.strip()
+                print(full_reply)
+
+                # Extract mood and reply
+                mood = "neutral"
+                reply = full_reply
+
+                if "MOOD:" in full_reply and "REPLY:" in full_reply:
+                    lines = full_reply.split("\n")
+                    for line in lines:
+                        if line.startswith("MOOD:"):
+                            mood = line.replace("MOOD:", "").strip().lower()
+                        if line.startswith("REPLY:"):
+                            reply = line.replace("REPLY:", "").strip()
+
+                if mood not in ["happy", "mad", "neutral"]:
+                    mood = "neutral"
 
                 if reply:
                     await message.reply(reply, mention_author=False)
-                    print("✅ Response sent")
-                else:
-                    await message.reply("mid message tbh", mention_author=False)
+                    await change_avatar(mood)
+                    print(f"✅ Replied + mood set to {mood}")
 
         except Exception as e:
             print(f"❌ ERROR: {e}")
+
+    await bot.process_commands(message)
 
 # ================= READY =================
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     print(f"Model: {MODEL}")
-    print("KingChat active")
+    print("AI controls mood + talks less")
     try:
         await bot.tree.sync()
         print("Slash commands synced")
     except Exception as e:
-        print(f"Sync error: {e}")
+        print(e)
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
