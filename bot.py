@@ -1,10 +1,10 @@
 import os
 import random
+import json
 import re
-import asyncio
+from datetime import datetime, timedelta
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -18,18 +18,17 @@ OWNER_ID = int(os.getenv("OWNER_ID"))
 
 MODEL = "gpt-4o"
 
-REACT_CHANCE = 0.25
+REACT_CHANCE = 0.22
 REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣"]
+
+# How long the bot stays in conversation mode after last interaction (in seconds)
+CONVERSATION_TIMEOUT = 90
 
 NICKNAMES = {
     "happy": "Kingchat😁",
     "mad": "Kingchat😒",
     "neutral": "Kingchat😐"
 }
-
-toggles = {}
-busy_with = {}
-in_battle = {}          # {channel_id: user_id}
 
 # ================= SETUP =================
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -40,23 +39,31 @@ intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+TOGGLE_FILE = "toggles.json"
+current_moods = {}
+active_conversations = {}  # {channel_id: last_active_time}
+
+def load_toggles():
+    if os.path.exists(TOGGLE_FILE):
+        with open(TOGGLE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_toggles(data):
+    with open(TOGGLE_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+toggles = load_toggles()
+
 SYSTEM_PROMPT = """
 You are KingChat, a Discord bot with attitude.
 
-Rules:
-- If someone is nice → be nice and chill.
-- If someone is mean → roast them (but not too hard).
-- Keep replies very short (1-2 sentences max).
-- Talk like a real person.
-"""
-
-BATTLE_PROMPT = """
-You are KingChat in a full toxic roast battle.
-Be extremely mean, ruthless, and career-ending with your roasts.
-No mercy. No soft punches. Go for the throat.
-Make them regret starting this.
-Keep every reply short (1-2 sentences max).
-Talk exactly like a toxic Discord user.
+Personality rules:
+- If someone is nice or friendly → be nice, chill, and friendly back.
+- If someone is mean, rude, or toxic → be mean and roast them, but don't go too far.
+- Keep replies short (1-2 sentences max).
+- Talk like a real person in Discord.
+- Never be extremely toxic, racist, or attack protected characteristics.
 """
 
 # ================= CHANGE NICKNAME =================
@@ -64,76 +71,38 @@ async def change_nickname(guild, mood: str):
     mood = mood.lower().strip()
     if mood not in NICKNAMES:
         mood = "neutral"
+
     new_nick = NICKNAMES[mood]
+
     try:
         me = guild.me
         if me.nick != new_nick:
             await me.edit(nick=new_nick)
-            print(f"✅ Nickname → {new_nick}")
+            current_moods[guild.id] = mood
+            print(f"✅ Nickname changed to '{new_nick}' in {guild.name}")
     except Exception as e:
-        print(f"Nickname error: {e}")
-
-# ================= DELETE BATTLE MESSAGES =================
-async def cleanup_battle_messages(channel, user_id):
-    try:
-        deleted = 0
-        async for msg in channel.history(limit=50):
-            if msg.author.id == bot.user.id or msg.author.id == user_id:
-                try:
-                    await msg.delete()
-                    deleted += 1
-                    await asyncio.sleep(0.35)
-                except:
-                    pass
-        print(f"🧹 Deleted {deleted} battle messages")
-    except Exception as e:
-        print(f"Cleanup error: {e}")
+        print(f"❌ Failed to change nickname: {e}")
 
 # ================= OWNER COMMANDS =================
 @bot.command(name="stop")
 async def stop(ctx):
     if ctx.author.id != OWNER_ID:
         return await ctx.send("Only the owner can use this command.")
-    toggles[str(ctx.guild.id)] = False
-    await ctx.send("🛑 Bot stopped.")
+    
+    guild_id = str(ctx.guild.id)
+    toggles[guild_id] = False
+    save_toggles(toggles)
+    await ctx.send("🛑 Bot stopped in this server.")
 
 @bot.command(name="start")
 async def start(ctx):
     if ctx.author.id != OWNER_ID:
         return await ctx.send("Only the owner can use this command.")
-    toggles[str(ctx.guild.id)] = True
-    await ctx.send("🟢 Bot started.")
-
-# ================= SLASH COMMAND =================
-@bot.tree.command(name="battle", description="Start a toxic roast battle with KingChat")
-async def battle(interaction: discord.Interaction):
-    if not toggles.get(str(interaction.guild_id), True):
-        return await interaction.response.send_message("Bot is stopped.", ephemeral=True)
-
-    channel_id = interaction.channel_id
-
-    if channel_id in busy_with and busy_with[channel_id] != interaction.user.id:
-        return await interaction.response.send_message(
-            f"I'm already talking to <@{busy_with[channel_id]}>.", ephemeral=True
-        )
-
-    busy_with[channel_id] = interaction.user.id
-    in_battle[channel_id] = interaction.user.id
-
-    await interaction.response.send_message(
-        f"🔥 **ROAST BATTLE STARTED** between me and {interaction.user.mention}!\n"
-        f"Say **give up** when you quit."
-    )
-
-# ================= HELPER: Detect if user gave up =================
-def user_gave_up(text: str) -> bool:
-    text = text.lower().strip()
-    phrases = [
-        "give up", "i give up", "you win", "fine you win", "i lose",
-        "i surrender", "i quit", "gg you win", "ok you win", "okay you win",
-        "you got me", "i'm done", "you win bro", "you win man"
-    ]
-    return any(p in text for p in phrases)
+    
+    guild_id = str(ctx.guild.id)
+    toggles[guild_id] = True
+    save_toggles(toggles)
+    await ctx.send("🟢 Bot started in this server.")
 
 # ================= MESSAGE HANDLER =================
 @bot.event
@@ -143,107 +112,97 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-    if not toggles.get(str(message.guild.id), True):
+    guild_id = str(message.guild.id)
+    if not toggles.get(guild_id, True):
         return
 
     content = message.content.lower()
     channel_id = message.channel.id
+    now = datetime.utcnow()
 
+    # Check if bot is being called
     is_called = (
         bot.user.mentioned_in(message)
         or "kingchat" in content
         or "king chat" in content
     )
 
-    # Busy with someone else
-    if channel_id in busy_with and busy_with[channel_id] != message.author.id:
-        if is_called:
-            await message.reply("Shut up, I'm talking to someone right now.", mention_author=False)
-        return
+    # Check if conversation is still active
+    last_active = active_conversations.get(channel_id)
+    in_conversation = last_active and (now - last_active) < timedelta(seconds=CONVERSATION_TIMEOUT)
 
-    # ===== BATTLE GIVE UP + CLEANUP =====
-    if channel_id in in_battle and in_battle[channel_id] == message.author.id:
-        if user_gave_up(message.content):
-            await message.reply("Yeah I know. GG, easy win 😎", mention_author=False)
-
-            # Delete the battle messages
-            await cleanup_battle_messages(message.channel, message.author.id)
-
-            # Clean up state
-            del in_battle[channel_id]
-            if channel_id in busy_with:
-                del busy_with[channel_id]
-            return
-
-    should_reply = False
-    is_battle = channel_id in in_battle and in_battle[channel_id] == message.author.id
-
+    # Start or continue conversation
     if is_called:
-        busy_with[channel_id] = message.author.id
+        active_conversations[channel_id] = now
         should_reply = True
-    elif channel_id in busy_with and busy_with[channel_id] == message.author.id:
-        should_reply = True
+    elif in_conversation:
+        # Still in conversation, reply sometimes so it feels natural
+        should_reply = random.random() < 0.45
+        if should_reply:
+            active_conversations[channel_id] = now
+    else:
+        should_reply = False
 
-    if not should_reply or not message.content.strip():
-        return
-
+    # React sometimes
     if random.random() < REACT_CHANCE:
         try:
             await message.add_reaction(random.choice(REACTION_EMOJIS))
         except:
             pass
 
+    if not should_reply or not message.content.strip():
+        return
+
     try:
-        print(f"→ Generating reply for: {message.content[:70]}")
+        print(f"\nReplying in conversation: {message.content[:80]}")
 
         history = []
-        async for msg in message.channel.history(limit=10):
+        async for msg in message.channel.history(limit=12):
             if msg.id == message.id:
                 continue
             history.append(f"{msg.author.display_name}: {msg.content}")
         history.reverse()
-        chat_context = "\n".join(history[-7:])
-
-        prompt = BATTLE_PROMPT if is_battle else SYSTEM_PROMPT
+        chat_context = "\n".join(history[-8:])
 
         async with message.channel.typing():
             response = client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": prompt},
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {
                         "role": "user",
                         "content": f"""Recent chat:
 {chat_context}
 
-{message.author.display_name} said: {message.content}
+Current message from {message.author.display_name}:
+{message.content}
 
-Reply as KingChat in 1-2 short sentences.
-Also choose a mood: happy, mad, or neutral.
+Reply as KingChat.
+Also decide your mood (happy, mad, or neutral).
 
-Answer in this exact format:
-MOOD: mad
-REPLY: your reply here"""
+You MUST reply in this exact format:
+MOOD: happy
+REPLY: your message here
+"""
                     }
                 ],
-                max_tokens=100,
-                temperature=0.95
+                max_tokens=110,
+                temperature=0.9
             )
 
-            full = response.choices[0].message.content.strip()
-            print("AI returned:", full)
+            full_reply = response.choices[0].message.content.strip()
+            print("AI Response:", full_reply)
 
             mood = "neutral"
-            reply = None
+            reply = full_reply
 
-            for line in full.splitlines():
-                if line.upper().startswith("MOOD:"):
-                    mood = line.split(":", 1)[1].strip().lower()
-                if line.upper().startswith("REPLY:"):
-                    reply = line.split(":", 1)[1].strip()
-
-            if not reply:
-                reply = full
+            if "MOOD:" in full_reply.upper():
+                for line in full_reply.splitlines():
+                    line_upper = line.upper()
+                    if line_upper.startswith("MOOD:"):
+                        mood = line.split(":", 1)[1].strip().lower()
+                    if line_upper.startswith("REPLY:"):
+                        reply = line.split(":", 1)[1].strip()
 
             if mood not in ["happy", "mad", "neutral"]:
                 mood = "neutral"
@@ -251,25 +210,17 @@ REPLY: your reply here"""
             if reply:
                 await message.reply(reply, mention_author=False)
                 await change_nickname(message.guild, mood)
-                print("✅ Reply sent")
 
     except Exception as e:
         print(f"❌ ERROR: {e}")
-        try:
-            await message.reply("something went wrong", mention_author=False)
-        except:
-            pass
 
 # ================= READY =================
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     print(f"Owner ID: {OWNER_ID}")
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} slash command(s)")
-    except Exception as e:
-        print(e)
+    print("Conversation mode active")
+    print("Triggers: kingchat / king chat / ping")
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
