@@ -13,6 +13,7 @@ load_dotenv()
 # ================= CONFIG =================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OWNER_ID = int(os.getenv("OWNER_ID"))   # Only you can use !start and !stop
 
 MODEL = "gpt-4o"
 
@@ -61,7 +62,6 @@ async def change_avatar(mood: str):
     if mood == current_mood:
         return
 
-    # Try both .png and .jpg
     for ext in [".png", ".jpg"]:
         path = f"moods/{mood}{ext}"
         if os.path.exists(path):
@@ -77,18 +77,22 @@ async def change_avatar(mood: str):
 
     print(f"❌ No image found for mood: {mood}")
 
-# ================= COMMANDS =================
+# ================= OWNER ONLY COMMANDS =================
 @bot.command(name="stop")
-@commands.has_permissions(manage_guild=True)
 async def stop(ctx):
+    if ctx.author.id != OWNER_ID:
+        return await ctx.send("Only the owner can use this command.")
+    
     guild_id = str(ctx.guild.id)
     toggles[guild_id] = False
     save_toggles(toggles)
     await ctx.send("🛑 Bot stopped in this server.")
 
 @bot.command(name="start")
-@commands.has_permissions(manage_guild=True)
 async def start(ctx):
+    if ctx.author.id != OWNER_ID:
+        return await ctx.send("Only the owner can use this command.")
+    
     guild_id = str(ctx.guild.id)
     toggles[guild_id] = True
     save_toggles(toggles)
@@ -100,7 +104,6 @@ async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
 
-    # Process commands first (!start / !stop)
     await bot.process_commands(message)
 
     guild_id = str(message.guild.id)
@@ -112,7 +115,6 @@ async def on_message(message: discord.Message):
     is_called = re.search(r"\bkingchat\b", content) or bot.user.mentioned_in(message)
     should_reply = is_called or (random.random() < REPLY_CHANCE)
 
-    # React sometimes
     if random.random() < REACT_CHANCE:
         try:
             await message.add_reaction(random.choice(REACTION_EMOJIS))
@@ -123,7 +125,6 @@ async def on_message(message: discord.Message):
         try:
             print(f"Thinking about: {message.content[:80]}")
 
-            # Get recent chat
             history = []
             async for msg in message.channel.history(limit=10):
                 if msg.id == message.id:
@@ -185,16 +186,12 @@ REPLY: your message here
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
-    print(f"Model: {MODEL}")
-    print("Commands: !start | !stop")
-    try:
-        # Make sure moods folder exists
-        if not os.path.exists("moods"):
-            print("⚠️ 'moods' folder not found!")
-        else:
-            print("Moods folder found:", os.listdir("moods"))
-    except Exception as e:
-        print(e)
+    print(f"Owner ID: {OWNER_ID}")
+    print("Commands: !start | !stop (Owner only)")
+    if os.path.exists("moods"):
+        print("Moods folder found:", os.listdir("moods"))
+    else:
+        print("⚠️ 'moods' folder not found!")
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
