@@ -2,6 +2,7 @@ import os
 import random
 import json
 import re
+from datetime import datetime, timedelta
 
 import discord
 from discord.ext import commands
@@ -17,10 +18,12 @@ OWNER_ID = int(os.getenv("OWNER_ID"))
 
 MODEL = "gpt-4o"
 
-REACT_CHANCE = 0.25
+REACT_CHANCE = 0.22
 REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣"]
 
-# Nickname based on mood
+# How long the bot stays in conversation mode after last interaction (in seconds)
+CONVERSATION_TIMEOUT = 90
+
 NICKNAMES = {
     "happy": "Kingchat😁",
     "mad": "Kingchat😒",
@@ -37,7 +40,8 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 TOGGLE_FILE = "toggles.json"
-current_moods = {}  # Stores mood per server
+current_moods = {}
+active_conversations = {}  # {channel_id: last_active_time}
 
 def load_toggles():
     if os.path.exists(TOGGLE_FILE):
@@ -62,7 +66,7 @@ Personality rules:
 - Never be extremely toxic, racist, or attack protected characteristics.
 """
 
-# ================= CHANGE NICKNAME PER SERVER =================
+# ================= CHANGE NICKNAME =================
 async def change_nickname(guild, mood: str):
     mood = mood.lower().strip()
     if mood not in NICKNAMES:
@@ -77,9 +81,9 @@ async def change_nickname(guild, mood: str):
             current_moods[guild.id] = mood
             print(f"✅ Nickname changed to '{new_nick}' in {guild.name}")
     except Exception as e:
-        print(f"❌ Failed to change nickname in {guild.name}: {e}")
+        print(f"❌ Failed to change nickname: {e}")
 
-# ================= OWNER ONLY COMMANDS =================
+# ================= OWNER COMMANDS =================
 @bot.command(name="stop")
 async def stop(ctx):
     if ctx.author.id != OWNER_ID:
@@ -113,16 +117,31 @@ async def on_message(message: discord.Message):
         return
 
     content = message.content.lower()
+    channel_id = message.channel.id
+    now = datetime.utcnow()
 
-    # Only reply if pinged or "kingchat" / "king chat" is said
+    # Check if bot is being called
     is_called = (
         bot.user.mentioned_in(message)
         or "kingchat" in content
         or "king chat" in content
     )
 
-    if not is_called:
-        return
+    # Check if conversation is still active
+    last_active = active_conversations.get(channel_id)
+    in_conversation = last_active and (now - last_active) < timedelta(seconds=CONVERSATION_TIMEOUT)
+
+    # Start or continue conversation
+    if is_called:
+        active_conversations[channel_id] = now
+        should_reply = True
+    elif in_conversation:
+        # Still in conversation, reply sometimes so it feels natural
+        should_reply = random.random() < 0.45
+        if should_reply:
+            active_conversations[channel_id] = now
+    else:
+        should_reply = False
 
     # React sometimes
     if random.random() < REACT_CHANCE:
@@ -131,8 +150,11 @@ async def on_message(message: discord.Message):
         except:
             pass
 
+    if not should_reply or not message.content.strip():
+        return
+
     try:
-        print(f"\nThinking about: {message.content[:80]}")
+        print(f"\nReplying in conversation: {message.content[:80]}")
 
         history = []
         async for msg in message.channel.history(limit=12):
@@ -164,7 +186,7 @@ REPLY: your message here
 """
                     }
                 ],
-                max_tokens=120,
+                max_tokens=110,
                 temperature=0.9
             )
 
@@ -197,8 +219,8 @@ REPLY: your message here
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     print(f"Owner ID: {OWNER_ID}")
-    print("Commands: !start | !stop (Owner only)")
-    print("Nickname system active (per server)")
+    print("Conversation mode active")
+    print("Triggers: kingchat / king chat / ping")
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
