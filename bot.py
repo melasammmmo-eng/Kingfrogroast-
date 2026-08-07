@@ -1,6 +1,7 @@
 import os
 import random
 import re
+import asyncio
 
 import discord
 from discord import app_commands
@@ -50,12 +51,12 @@ Rules:
 """
 
 BATTLE_PROMPT = """
-You are KingChat in a serious roast battle.
-Be mean, ruthless, and creative.
-Destroy their ego with short, sharp, funny roasts.
-No mercy. No soft replies.
-Keep every reply to 1-2 sentences max.
-Talk like a real Discord user.
+You are KingChat in a full toxic roast battle.
+Be extremely mean, ruthless, and career-ending with your roasts.
+No mercy. No soft punches. Go for the throat.
+Make them regret starting this.
+Keep every reply short (1-2 sentences max).
+Talk exactly like a toxic Discord user.
 """
 
 # ================= CHANGE NICKNAME =================
@@ -71,6 +72,22 @@ async def change_nickname(guild, mood: str):
             print(f"✅ Nickname → {new_nick}")
     except Exception as e:
         print(f"Nickname error: {e}")
+
+# ================= DELETE BATTLE MESSAGES =================
+async def cleanup_battle_messages(channel, user_id):
+    try:
+        deleted = 0
+        async for msg in channel.history(limit=50):
+            if msg.author.id == bot.user.id or msg.author.id == user_id:
+                try:
+                    await msg.delete()
+                    deleted += 1
+                    await asyncio.sleep(0.35)
+                except:
+                    pass
+        print(f"🧹 Deleted {deleted} battle messages")
+    except Exception as e:
+        print(f"Cleanup error: {e}")
 
 # ================= OWNER COMMANDS =================
 @bot.command(name="stop")
@@ -88,7 +105,7 @@ async def start(ctx):
     await ctx.send("🟢 Bot started.")
 
 # ================= SLASH COMMAND =================
-@bot.tree.command(name="battle", description="Start a roast battle with KingChat")
+@bot.tree.command(name="battle", description="Start a toxic roast battle with KingChat")
 async def battle(interaction: discord.Interaction):
     if not toggles.get(str(interaction.guild_id), True):
         return await interaction.response.send_message("Bot is stopped.", ephemeral=True)
@@ -104,37 +121,19 @@ async def battle(interaction: discord.Interaction):
     in_battle[channel_id] = interaction.user.id
 
     await interaction.response.send_message(
-        f"🔥 **ROAST BATTLE STARTED** with {interaction.user.mention}!\n"
-        f"You go first. Try not to cry."
+        f"🔥 **ROAST BATTLE STARTED** between me and {interaction.user.mention}!\n"
+        f"Say **give up** when you quit."
     )
 
 # ================= HELPER: Detect if user gave up =================
 def user_gave_up(text: str) -> bool:
     text = text.lower().strip()
-
-    give_up_phrases = [
-        "fine you win",
-        "you win",
-        "i give up",
-        "i lose",
-        "you win bro",
-        "alright you win",
-        "ok you win",
-        "okay you win",
-        "gg you win",
-        "you win man",
-        "i surrender",
-        "i quit",
-        "you got me",
-        "you win this",
-        "fine i lose",
-        "ok i lose"
+    phrases = [
+        "give up", "i give up", "you win", "fine you win", "i lose",
+        "i surrender", "i quit", "gg you win", "ok you win", "okay you win",
+        "you got me", "i'm done", "you win bro", "you win man"
     ]
-
-    for phrase in give_up_phrases:
-        if phrase in text:
-            return True
-    return False
+    return any(p in text for p in phrases)
 
 # ================= MESSAGE HANDLER =================
 @bot.event
@@ -162,12 +161,15 @@ async def on_message(message: discord.Message):
             await message.reply("Shut up, I'm talking to someone right now.", mention_author=False)
         return
 
-    # ===== BATTLE GIVE UP LOGIC =====
+    # ===== BATTLE GIVE UP + CLEANUP =====
     if channel_id in in_battle and in_battle[channel_id] == message.author.id:
         if user_gave_up(message.content):
             await message.reply("Yeah I know. GG, easy win 😎", mention_author=False)
-            
-            # Clean up
+
+            # Delete the battle messages
+            await cleanup_battle_messages(message.channel, message.author.id)
+
+            # Clean up state
             del in_battle[channel_id]
             if channel_id in busy_with:
                 del busy_with[channel_id]
