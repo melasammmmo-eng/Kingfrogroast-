@@ -17,7 +17,6 @@ OWNER_ID = int(os.getenv("OWNER_ID"))
 
 MODEL = "gpt-4o"
 
-REPLY_CHANCE = 0.15
 REACT_CHANCE = 0.25
 REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣"]
 
@@ -68,15 +67,20 @@ async def change_avatar(mood: str):
         print(f"Already on mood: {mood}")
         return
 
+    # Case-insensitive search for the image
+    if not os.path.exists("moods"):
+        print("❌ moods folder not found")
+        return
+
     path = None
-    for ext in [".png", ".jpg", ".jpeg"]:
-        test_path = f"moods/{mood}{ext}"
-        if os.path.exists(test_path):
-            path = test_path
+    for filename in os.listdir("moods"):
+        name_without_ext = os.path.splitext(filename)[0].lower()
+        if name_without_ext == mood:
+            path = os.path.join("moods", filename)
             break
 
     if not path:
-        print(f"❌ Image not found for mood '{mood}'. Files in moods folder: {os.listdir('moods') if os.path.exists('moods') else 'Folder missing'}")
+        print(f"❌ Image not found for mood '{mood}'. Available files: {os.listdir('moods')}")
         return
 
     try:
@@ -122,35 +126,42 @@ async def on_message(message: discord.Message):
 
     content = message.content.lower()
 
-    is_called = re.search(r"\bkingchat\b", content) or bot.user.mentioned_in(message)
-    should_reply = is_called or (random.random() < REPLY_CHANCE)
+    # Only reply if pinged or "kingchat" / "king chat" is said
+    is_called = (
+        bot.user.mentioned_in(message)
+        or "kingchat" in content
+        or "king chat" in content
+    )
 
+    if not is_called:
+        return
+
+    # React sometimes
     if random.random() < REACT_CHANCE:
         try:
             await message.add_reaction(random.choice(REACTION_EMOJIS))
         except:
             pass
 
-    if should_reply and message.content.strip():
-        try:
-            print(f"\nThinking about: {message.content[:80]}")
+    try:
+        print(f"\nThinking about: {message.content[:80]}")
 
-            history = []
-            async for msg in message.channel.history(limit=10):
-                if msg.id == message.id:
-                    continue
-                history.append(f"{msg.author.display_name}: {msg.content}")
-            history.reverse()
-            chat_context = "\n".join(history[-7:])
+        history = []
+        async for msg in message.channel.history(limit=12):
+            if msg.id == message.id:
+                continue
+            history.append(f"{msg.author.display_name}: {msg.content}")
+        history.reverse()
+        chat_context = "\n".join(history[-8:])
 
-            async with message.channel.typing():
-                response = client.chat.completions.create(
-                    model=MODEL,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {
-                            "role": "user",
-                            "content": f"""Recent chat:
+        async with message.channel.typing():
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": f"""Recent chat:
 {chat_context}
 
 Current message from {message.author.display_name}:
@@ -163,36 +174,35 @@ You MUST reply in this exact format:
 MOOD: happy
 REPLY: your message here
 """
-                        }
-                    ],
-                    max_tokens=120,
-                    temperature=0.9
-                )
+                    }
+                ],
+                max_tokens=120,
+                temperature=0.9
+            )
 
-                full_reply = response.choices[0].message.content.strip()
-                print("AI Response:", full_reply)
+            full_reply = response.choices[0].message.content.strip()
+            print("AI Response:", full_reply)
 
+            mood = "neutral"
+            reply = full_reply
+
+            if "MOOD:" in full_reply.upper():
+                for line in full_reply.splitlines():
+                    line_upper = line.upper()
+                    if line_upper.startswith("MOOD:"):
+                        mood = line.split(":", 1)[1].strip().lower()
+                    if line_upper.startswith("REPLY:"):
+                        reply = line.split(":", 1)[1].strip()
+
+            if mood not in ["happy", "mad", "neutral"]:
                 mood = "neutral"
-                reply = full_reply
 
-                # Better parsing
-                if "MOOD:" in full_reply.upper():
-                    for line in full_reply.splitlines():
-                        line_upper = line.upper()
-                        if line_upper.startswith("MOOD:"):
-                            mood = line.split(":", 1)[1].strip().lower()
-                        if line_upper.startswith("REPLY:"):
-                            reply = line.split(":", 1)[1].strip()
+            if reply:
+                await message.reply(reply, mention_author=False)
+                await change_avatar(mood)
 
-                if mood not in ["happy", "mad", "neutral"]:
-                    mood = "neutral"
-
-                if reply:
-                    await message.reply(reply, mention_author=False)
-                    await change_avatar(mood)
-
-        except Exception as e:
-            print(f"❌ ERROR: {e}")
+    except Exception as e:
+        print(f"❌ ERROR: {e}")
 
 # ================= READY =================
 @bot.event
@@ -204,7 +214,7 @@ async def on_ready():
     if os.path.exists("moods"):
         print("✅ Moods folder found. Files:", os.listdir("moods"))
     else:
-        print("❌ 'moods' folder NOT found! Avatar changing will not work.")
+        print("❌ 'moods' folder NOT found!")
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
