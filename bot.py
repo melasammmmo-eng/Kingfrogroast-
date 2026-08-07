@@ -4,7 +4,6 @@ import json
 import re
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -17,7 +16,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 MODEL = "gpt-4o"
 
-REPLY_CHANCE = 0.12          # Talks less
+REPLY_CHANCE = 0.15
 REACT_CHANCE = 0.25
 REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣"]
 
@@ -46,65 +45,63 @@ def save_toggles(data):
 toggles = load_toggles()
 
 SYSTEM_PROMPT = """
-You are KingChat, a ruthless Discord roasting bot.
+You are KingChat, a Discord bot with attitude.
 
-Rules:
-- Deliver real, sharp, funny roasts.
-- Be mean, blunt, and creative.
-- Never soft or encouraging.
-- Keep replies extremely short (1-2 sentences max).
+Personality rules:
+- If someone is nice or friendly → be nice, chill, and friendly back.
+- If someone is mean, rude, or toxic → be mean and roast them, but don't go too far.
+- Keep replies short (1-2 sentences max).
 - Talk like a real person in Discord.
-- Never be racist, sexist, or attack protected characteristics.
-
-Also decide your current mood based on the conversation.
-Mood must be one of these only: happy, mad, neutral
+- Never be extremely toxic, racist, or attack protected characteristics.
 """
 
-# ================= CHANGE PROFILE =================
+# ================= CHANGE PROFILE PICTURE =================
 async def change_avatar(mood: str):
     global current_mood
     if mood == current_mood:
         return
 
-    path = f"moods/{mood}.png"
-    if not os.path.exists(path):
-        path = f"moods/{mood}.jpg"
-        if not os.path.exists(path):
-            print(f"No image found for mood: {mood}")
-            return
+    # Try both .png and .jpg
+    for ext in [".png", ".jpg"]:
+        path = f"moods/{mood}{ext}"
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as f:
+                    await bot.user.edit(avatar=f.read())
+                current_mood = mood
+                print(f"✅ Profile picture changed to: {mood}")
+                return
+            except Exception as e:
+                print(f"Failed to change avatar: {e}")
+                return
 
-    try:
-        with open(path, "rb") as f:
-            await bot.user.edit(avatar=f.read())
-        current_mood = mood
-        print(f"✅ Avatar changed to: {mood}")
-    except Exception as e:
-        print(f"Failed to change avatar: {e}")
+    print(f"❌ No image found for mood: {mood}")
 
-# ================= SLASH COMMAND =================
-@bot.tree.command(name="toggle", description="Turn KingChat on or off")
-@app_commands.describe(state="on or off")
-@app_commands.choices(state=[
-    app_commands.Choice(name="on", value="on"),
-    app_commands.Choice(name="off", value="off"),
-])
-async def toggle(interaction: discord.Interaction, state: app_commands.Choice[str]):
-    if not interaction.user.guild_permissions.manage_guild:
-        await interaction.response.send_message("You need Manage Server permission.", ephemeral=True)
-        return
-
-    guild_id = str(interaction.guild_id)
-    enabled = state.value == "on"
-    toggles[guild_id] = enabled
+# ================= COMMANDS =================
+@bot.command(name="stop")
+@commands.has_permissions(manage_guild=True)
+async def stop(ctx):
+    guild_id = str(ctx.guild.id)
+    toggles[guild_id] = False
     save_toggles(toggles)
+    await ctx.send("🛑 Bot stopped in this server.")
 
-    await interaction.response.send_message(f"KingChat is now {'🟢 ON' if enabled else '🔴 OFF'}")
+@bot.command(name="start")
+@commands.has_permissions(manage_guild=True)
+async def start(ctx):
+    guild_id = str(ctx.guild.id)
+    toggles[guild_id] = True
+    save_toggles(toggles)
+    await ctx.send("🟢 Bot started in this server.")
 
 # ================= MESSAGE HANDLER =================
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
+
+    # Process commands first (!start / !stop)
+    await bot.process_commands(message)
 
     guild_id = str(message.guild.id)
     if not toggles.get(guild_id, True):
@@ -115,7 +112,7 @@ async def on_message(message: discord.Message):
     is_called = re.search(r"\bkingchat\b", content) or bot.user.mentioned_in(message)
     should_reply = is_called or (random.random() < REPLY_CHANCE)
 
-    # React only sometimes
+    # React sometimes
     if random.random() < REACT_CHANCE:
         try:
             await message.add_reaction(random.choice(REACTION_EMOJIS))
@@ -126,14 +123,14 @@ async def on_message(message: discord.Message):
         try:
             print(f"Thinking about: {message.content[:80]}")
 
-            # Get recent chat so AI can see if people are talking about it
+            # Get recent chat
             history = []
-            async for msg in message.channel.history(limit=12):
+            async for msg in message.channel.history(limit=10):
                 if msg.id == message.id:
                     continue
                 history.append(f"{msg.author.display_name}: {msg.content}")
             history.reverse()
-            chat_context = "\n".join(history[-8:])
+            chat_context = "\n".join(history[-7:])
 
             async with message.channel.typing():
                 response = client.chat.completions.create(
@@ -148,29 +145,27 @@ async def on_message(message: discord.Message):
 Current message from {message.author.display_name}:
 {message.content}
 
-Reply with a roast if needed.
+Reply as KingChat.
 Also decide your mood (happy, mad, or neutral).
 
-Format your answer exactly like this:
-MOOD: mad
-REPLY: your roast here
+Format exactly like this:
+MOOD: neutral
+REPLY: your message here
 """
                         }
                     ],
                     max_tokens=120,
-                    temperature=0.95
+                    temperature=0.9
                 )
 
                 full_reply = response.choices[0].message.content.strip()
                 print(full_reply)
 
-                # Extract mood and reply
                 mood = "neutral"
                 reply = full_reply
 
                 if "MOOD:" in full_reply and "REPLY:" in full_reply:
-                    lines = full_reply.split("\n")
-                    for line in lines:
+                    for line in full_reply.splitlines():
                         if line.startswith("MOOD:"):
                             mood = line.replace("MOOD:", "").strip().lower()
                         if line.startswith("REPLY:"):
@@ -182,22 +177,22 @@ REPLY: your roast here
                 if reply:
                     await message.reply(reply, mention_author=False)
                     await change_avatar(mood)
-                    print(f"✅ Replied + mood set to {mood}")
 
         except Exception as e:
             print(f"❌ ERROR: {e}")
-
-    await bot.process_commands(message)
 
 # ================= READY =================
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     print(f"Model: {MODEL}")
-    print("AI controls mood + talks less")
+    print("Commands: !start | !stop")
     try:
-        await bot.tree.sync()
-        print("Slash commands synced")
+        # Make sure moods folder exists
+        if not os.path.exists("moods"):
+            print("⚠️ 'moods' folder not found!")
+        else:
+            print("Moods folder found:", os.listdir("moods"))
     except Exception as e:
         print(e)
 
