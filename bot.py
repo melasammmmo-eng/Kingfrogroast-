@@ -1,4 +1,4 @@
-import os
+import osdis
 import random
 import json
 import re
