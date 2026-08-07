@@ -13,7 +13,7 @@ load_dotenv()
 # ================= CONFIG =================
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OWNER_ID = int(os.getenv("OWNER_ID"))   # Only you can use !start and !stop
+OWNER_ID = int(os.getenv("OWNER_ID"))
 
 MODEL = "gpt-4o"
 
@@ -59,23 +59,33 @@ Personality rules:
 # ================= CHANGE PROFILE PICTURE =================
 async def change_avatar(mood: str):
     global current_mood
+
+    mood = mood.lower().strip()
+    if mood not in ["happy", "mad", "neutral"]:
+        mood = "neutral"
+
     if mood == current_mood:
+        print(f"Already on mood: {mood}")
         return
 
-    for ext in [".png", ".jpg"]:
-        path = f"moods/{mood}{ext}"
-        if os.path.exists(path):
-            try:
-                with open(path, "rb") as f:
-                    await bot.user.edit(avatar=f.read())
-                current_mood = mood
-                print(f"✅ Profile picture changed to: {mood}")
-                return
-            except Exception as e:
-                print(f"Failed to change avatar: {e}")
-                return
+    path = None
+    for ext in [".png", ".jpg", ".jpeg"]:
+        test_path = f"moods/{mood}{ext}"
+        if os.path.exists(test_path):
+            path = test_path
+            break
 
-    print(f"❌ No image found for mood: {mood}")
+    if not path:
+        print(f"❌ Image not found for mood '{mood}'. Files in moods folder: {os.listdir('moods') if os.path.exists('moods') else 'Folder missing'}")
+        return
+
+    try:
+        with open(path, "rb") as f:
+            await bot.user.edit(avatar=f.read())
+        current_mood = mood
+        print(f"✅ Successfully changed avatar to: {mood}")
+    except Exception as e:
+        print(f"❌ Failed to change avatar: {e}")
 
 # ================= OWNER ONLY COMMANDS =================
 @bot.command(name="stop")
@@ -123,7 +133,7 @@ async def on_message(message: discord.Message):
 
     if should_reply and message.content.strip():
         try:
-            print(f"Thinking about: {message.content[:80]}")
+            print(f"\nThinking about: {message.content[:80]}")
 
             history = []
             async for msg in message.channel.history(limit=10):
@@ -149,8 +159,8 @@ Current message from {message.author.display_name}:
 Reply as KingChat.
 Also decide your mood (happy, mad, or neutral).
 
-Format exactly like this:
-MOOD: neutral
+You MUST reply in this exact format:
+MOOD: happy
 REPLY: your message here
 """
                         }
@@ -160,17 +170,19 @@ REPLY: your message here
                 )
 
                 full_reply = response.choices[0].message.content.strip()
-                print(full_reply)
+                print("AI Response:", full_reply)
 
                 mood = "neutral"
                 reply = full_reply
 
-                if "MOOD:" in full_reply and "REPLY:" in full_reply:
+                # Better parsing
+                if "MOOD:" in full_reply.upper():
                     for line in full_reply.splitlines():
-                        if line.startswith("MOOD:"):
-                            mood = line.replace("MOOD:", "").strip().lower()
-                        if line.startswith("REPLY:"):
-                            reply = line.replace("REPLY:", "").strip()
+                        line_upper = line.upper()
+                        if line_upper.startswith("MOOD:"):
+                            mood = line.split(":", 1)[1].strip().lower()
+                        if line_upper.startswith("REPLY:"):
+                            reply = line.split(":", 1)[1].strip()
 
                 if mood not in ["happy", "mad", "neutral"]:
                     mood = "neutral"
@@ -188,10 +200,11 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     print(f"Owner ID: {OWNER_ID}")
     print("Commands: !start | !stop (Owner only)")
+
     if os.path.exists("moods"):
-        print("Moods folder found:", os.listdir("moods"))
+        print("✅ Moods folder found. Files:", os.listdir("moods"))
     else:
-        print("⚠️ 'moods' folder not found!")
+        print("❌ 'moods' folder NOT found! Avatar changing will not work.")
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
