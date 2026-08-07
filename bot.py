@@ -28,6 +28,7 @@ NICKNAMES = {
 
 toggles = {}
 busy_with = {}
+in_battle = {}          # {channel_id: user_id}
 
 # ================= SETUP =================
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -49,9 +50,12 @@ Rules:
 """
 
 BATTLE_PROMPT = """
-You are in a roast battle.
-Give short, sharp, funny roasts.
-1-2 sentences max.
+You are KingChat in a serious roast battle.
+Be mean, ruthless, and creative.
+Destroy their ego with short, sharp, funny roasts.
+No mercy. No soft replies.
+Keep every reply to 1-2 sentences max.
+Talk like a real Discord user.
 """
 
 # ================= CHANGE NICKNAME =================
@@ -90,13 +94,47 @@ async def battle(interaction: discord.Interaction):
         return await interaction.response.send_message("Bot is stopped.", ephemeral=True)
 
     channel_id = interaction.channel_id
+
     if channel_id in busy_with and busy_with[channel_id] != interaction.user.id:
         return await interaction.response.send_message(
             f"I'm already talking to <@{busy_with[channel_id]}>.", ephemeral=True
         )
 
     busy_with[channel_id] = interaction.user.id
-    await interaction.response.send_message(f"🔥 Roast battle started with {interaction.user.mention}! You go first.")
+    in_battle[channel_id] = interaction.user.id
+
+    await interaction.response.send_message(
+        f"🔥 **ROAST BATTLE STARTED** with {interaction.user.mention}!\n"
+        f"You go first. Try not to cry."
+    )
+
+# ================= HELPER: Detect if user gave up =================
+def user_gave_up(text: str) -> bool:
+    text = text.lower().strip()
+
+    give_up_phrases = [
+        "fine you win",
+        "you win",
+        "i give up",
+        "i lose",
+        "you win bro",
+        "alright you win",
+        "ok you win",
+        "okay you win",
+        "gg you win",
+        "you win man",
+        "i surrender",
+        "i quit",
+        "you got me",
+        "you win this",
+        "fine i lose",
+        "ok i lose"
+    ]
+
+    for phrase in give_up_phrases:
+        if phrase in text:
+            return True
+    return False
 
 # ================= MESSAGE HANDLER =================
 @bot.event
@@ -124,8 +162,19 @@ async def on_message(message: discord.Message):
             await message.reply("Shut up, I'm talking to someone right now.", mention_author=False)
         return
 
+    # ===== BATTLE GIVE UP LOGIC =====
+    if channel_id in in_battle and in_battle[channel_id] == message.author.id:
+        if user_gave_up(message.content):
+            await message.reply("Yeah I know. GG, easy win 😎", mention_author=False)
+            
+            # Clean up
+            del in_battle[channel_id]
+            if channel_id in busy_with:
+                del busy_with[channel_id]
+            return
+
     should_reply = False
-    is_battle = False
+    is_battle = channel_id in in_battle and in_battle[channel_id] == message.author.id
 
     if is_called:
         busy_with[channel_id] = message.author.id
@@ -171,12 +220,12 @@ Reply as KingChat in 1-2 short sentences.
 Also choose a mood: happy, mad, or neutral.
 
 Answer in this exact format:
-MOOD: neutral
+MOOD: mad
 REPLY: your reply here"""
                     }
                 ],
                 max_tokens=100,
-                temperature=0.9
+                temperature=0.95
             )
 
             full = response.choices[0].message.content.strip()
@@ -191,7 +240,6 @@ REPLY: your reply here"""
                 if line.upper().startswith("REPLY:"):
                     reply = line.split(":", 1)[1].strip()
 
-            # Fallback if format is broken
             if not reply:
                 reply = full
 
@@ -202,8 +250,6 @@ REPLY: your reply here"""
                 await message.reply(reply, mention_author=False)
                 await change_nickname(message.guild, mood)
                 print("✅ Reply sent")
-            else:
-                await message.reply("yeah?", mention_author=False)
 
     except Exception as e:
         print(f"❌ ERROR: {e}")
