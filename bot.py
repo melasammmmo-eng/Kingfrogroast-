@@ -20,6 +20,13 @@ MODEL = "gpt-4o"
 REACT_CHANCE = 0.25
 REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣"]
 
+# Nickname based on mood
+NICKNAMES = {
+    "happy": "Kingchat😁",
+    "mad": "Kingchat😒",
+    "neutral": "Kingchat😐"
+}
+
 # ================= SETUP =================
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -30,7 +37,7 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 TOGGLE_FILE = "toggles.json"
-current_mood = "neutral"
+current_moods = {}  # Stores mood per server
 
 def load_toggles():
     if os.path.exists(TOGGLE_FILE):
@@ -55,41 +62,22 @@ Personality rules:
 - Never be extremely toxic, racist, or attack protected characteristics.
 """
 
-# ================= CHANGE PROFILE PICTURE =================
-async def change_avatar(mood: str):
-    global current_mood
-
+# ================= CHANGE NICKNAME PER SERVER =================
+async def change_nickname(guild, mood: str):
     mood = mood.lower().strip()
-    if mood not in ["happy", "mad", "neutral"]:
+    if mood not in NICKNAMES:
         mood = "neutral"
 
-    if mood == current_mood:
-        print(f"Already on mood: {mood}")
-        return
-
-    # Case-insensitive search for the image
-    if not os.path.exists("moods"):
-        print("❌ moods folder not found")
-        return
-
-    path = None
-    for filename in os.listdir("moods"):
-        name_without_ext = os.path.splitext(filename)[0].lower()
-        if name_without_ext == mood:
-            path = os.path.join("moods", filename)
-            break
-
-    if not path:
-        print(f"❌ Image not found for mood '{mood}'. Available files: {os.listdir('moods')}")
-        return
+    new_nick = NICKNAMES[mood]
 
     try:
-        with open(path, "rb") as f:
-            await bot.user.edit(avatar=f.read())
-        current_mood = mood
-        print(f"✅ Successfully changed avatar to: {mood}")
+        me = guild.me
+        if me.nick != new_nick:
+            await me.edit(nick=new_nick)
+            current_moods[guild.id] = mood
+            print(f"✅ Nickname changed to '{new_nick}' in {guild.name}")
     except Exception as e:
-        print(f"❌ Failed to change avatar: {e}")
+        print(f"❌ Failed to change nickname in {guild.name}: {e}")
 
 # ================= OWNER ONLY COMMANDS =================
 @bot.command(name="stop")
@@ -199,7 +187,7 @@ REPLY: your message here
 
             if reply:
                 await message.reply(reply, mention_author=False)
-                await change_avatar(mood)
+                await change_nickname(message.guild, mood)
 
     except Exception as e:
         print(f"❌ ERROR: {e}")
@@ -210,11 +198,7 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     print(f"Owner ID: {OWNER_ID}")
     print("Commands: !start | !stop (Owner only)")
-
-    if os.path.exists("moods"):
-        print("✅ Moods folder found. Files:", os.listdir("moods"))
-    else:
-        print("❌ 'moods' folder NOT found!")
+    print("Nickname system active (per server)")
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
