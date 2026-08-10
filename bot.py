@@ -118,18 +118,28 @@ class QuestStartView(View):
             res = client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": "Generate one short fun Animal Company challenge. Only output the challenge."},
-                    {"role": "user", "content": "Create a creative recordable challenge for Animal Company."}
+                    {
+                        "role": "system",
+                        "content": "Generate one very simple and clear Animal Company challenge. Examples: 'Dig 5 iron ore', 'Kill an Angler Fish', 'Sell 3 items', 'Survive 60 seconds'. Only output the challenge."
+                    },
+                    {
+                        "role": "user",
+                        "content": "Create a simple Animal Company challenge."
+                    }
                 ],
-                max_tokens=50,
-                temperature=1.2
+                max_tokens=40,
+                temperature=0.9
             )
             task = res.choices[0].message.content.strip()
         except:
-            task = "Survive 90 seconds while being chased"
+            task = "Dig 5 iron ore"
 
         active_quests[str(self.user_id)] = {"task": task, "guild_id": self.guild_id}
-        embed = discord.Embed(title="🎯 Your AC Quest", description=f"**Challenge:**\n{task}\n\nSend the video in this DM when ready.", color=discord.Color.green())
+        embed = discord.Embed(
+            title="🎯 Your AC Quest",
+            description=f"**Challenge:**\n{task}\n\nSend any proof file (video/image) in this DM when ready.",
+            color=discord.Color.green()
+        )
         await interaction.edit_original_response(embed=embed, view=None)
 
     @discord.ui.button(label="No", style=discord.ButtonStyle.red)
@@ -195,33 +205,38 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
+    # ===== Proof System (accepts any file) =====
     if isinstance(message.channel, discord.DMChannel):
         user_id = str(message.author.id)
         if user_id in active_quests and message.attachments:
-            for att in message.attachments:
-                if att.content_type and "video" in att.content_type:
-                    quest = active_quests[user_id]["task"]
-                    await message.channel.send("Checking your video with AI... please wait.")
+            att = message.attachments[0]
+            quest = active_quests[user_id]["task"]
 
-                    is_valid, reason = await check_proof(att.url, quest)
+            await message.channel.send("Checking your proof... please wait.")
 
-                    if is_valid:
-                        user_points[user_id] = user_points.get(user_id, 0) + 5
-                        save_json(POINTS_FILE, user_points)
+            is_valid, reason = await check_proof(att.url, quest, att.filename)
 
-                        guild_id = active_quests[user_id].get("guild_id")
-                        if guild_id and guild_id.isdigit():
-                            guild = bot.get_guild(int(guild_id))
-                            if guild:
-                                member = guild.get_member(message.author.id)
-                                if member:
-                                    await check_and_give_roles(member)
+            if is_valid:
+                user_points[user_id] = user_points.get(user_id, 0) + 5
+                save_json(POINTS_FILE, user_points)
 
-                        del active_quests[user_id]
-                        await message.channel.send(f"✅ **Proof accepted!** (+5 points)\nReason: {reason}\nTotal points: **{user_points[user_id]}**")
-                    else:
-                        await message.channel.send(f"❌ Proof rejected.\nReason: {reason}\nTry again.")
-                    return
+                guild_id = active_quests[user_id].get("guild_id")
+                if guild_id and guild_id.isdigit():
+                    guild = bot.get_guild(int(guild_id))
+                    if guild:
+                        member = guild.get_member(message.author.id)
+                        if member:
+                            await check_and_give_roles(member)
+
+                del active_quests[user_id]
+                await message.channel.send(
+                    f"✅ **Proof accepted!** (+5 points)\nReason: {reason}\nTotal points: **{user_points[user_id]}**"
+                )
+            else:
+                await message.channel.send(
+                    f"❌ Proof rejected.\nReason: {reason}\nTry again."
+                )
+            return
 
     if not message.guild:
         return
@@ -233,9 +248,14 @@ async def on_message(message: discord.Message):
 
     content = message.content.lower()
 
+    # AC Quest trigger
     if re.search(r"\bac\s*quest\b", content) and ac_enabled.get(str(message.guild.id), False):
         try:
-            embed = discord.Embed(title="🎮 AC Quest", description="You ready for your AC Quest?", color=discord.Color.blurple())
+            embed = discord.Embed(
+                title="🎮 AC Quest",
+                description="You ready for your AC Quest?",
+                color=discord.Color.blurple()
+            )
             view = QuestStartView(message.author.id, str(message.guild.id))
             await message.author.send(embed=embed, view=view)
             await message.reply("Check your DMs!", mention_author=False)
@@ -243,6 +263,7 @@ async def on_message(message: discord.Message):
             await message.reply("I can't DM you.", mention_author=False)
         return
 
+    # Normal conversation
     is_called = bot.user.mentioned_in(message) or "kingchat" in content or "king chat" in content
     if not is_called and random.random() > 0.18:
         return
