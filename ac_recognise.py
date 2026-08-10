@@ -1,4 +1,8 @@
 import os
+import tempfile
+import subprocess
+import base64
+import aiohttp
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -7,14 +11,61 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def check_proof(file_url: str, quest_text: str, filename: str = "") -> tuple[bool, str]:
     try:
-        prompt = f"""
-You are verifying proof for an Animal Company quest.
+        # Download the file
+        async with aiohttp.ClientSession() as session:
+            async with session.get(file_url) as resp:
+                if resp.status != 200:
+                    return False, "Could not download the file."
+                file_data = await resp.read()
 
-Quest: "{quest_text}"
-Filename: {filename}
+        with tempfile.TemporaryDirectory() as tmp:
+            # Save file
+            ext = ".mp4"
+            if filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                ext = ".jpg"
+            file_path = os.path.join(tmp, f"proof{ext}")
+            
+            with open(file_path, "wb") as f:
+                f.write(file_data)
 
-The player uploaded a file as proof.
-Be reasonably lenient. If it seems like they tried to complete the quest, accept it.
+            frames = []
+
+            # If it's an image, just use it
+            if ext == ".jpg":
+                frames.append(file_path)
+            else:
+                # Extract frames from video using ffmpeg
+                for i, timestamp in enumerate(["00:00:01", "00:00:03", "00:00:06", "00:00:09"]):
+                    frame_path = os.path.join(tmp, f"frame_{i}.jpg")
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", timestamp,
+                        "-i", file_path,
+                        "-frames:v", "1",
+                        "-q:v", "2",
+                        frame_path
+                    ]
+                    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if os.path.exists(frame_path):
+                        frames.append(frame_path)
+
+            if not frames:
+                return False, "Could not extract any frames from the video. Make sure it's a valid video."
+
+            # Build vision prompt
+            content = [
+                {
+                    "type": "text",
+                    "text": f"""You are verifying proof for an Animal Company VR quest.
+
+Quest the player must complete: "{quest_text}"
+
+Look carefully at the frames from their video/screenshot.
+Decide if this is real proof that they completed the quest inside Animal Company.
+
+Be strict:
+- Reject random photos, selfies, memes, or unrelated content
+- Accept only if it clearly shows gameplay related to the quest
 
 Reply in this exact format:
 VALID: yes
@@ -23,23 +74,34 @@ REASON: short reason
 or
 
 VALID: no
-REASON: short reason
-"""
+REASON: short reason"""
+                }
+            ]
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100
-        )
+            for frame in frames[:4]:  # max 4 frames
+                with open(frame, "rb") as img_file:
+                    b64 = base64.b64encode(img_file.read()).decode("utf-8")
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{b64}"
+                    }
+                })
 
-        result = response.choices[0].message.content.strip().lower()
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": content}],
+                max_tokens=150
+            )
 
-        if "valid: yes" in result:
-            reason = result.split("reason:")[-1].strip() if "reason:" in result else "Accepted"
-            return True, reason
-        else:
-            reason = result.split("reason:")[-1].strip() if "reason:" in result else "Rejected"
-            return False, reason
+            result = response.choices[0].message.content.strip().lower()
+
+            if "valid: yes" in result:
+                reason = result.split("reason:")[-1].strip() if "reason:" in result else "Looks valid"
+                return True, reason
+            else:
+                reason = result.split("reason:")[-1].strip() if "reason:" in result else "Does not match the quest"
+                return False, reason
 
     except Exception as e:
-        return False, f"Error: {str(e)}"
+        return False, f"Error while checking: {str(e)}"
