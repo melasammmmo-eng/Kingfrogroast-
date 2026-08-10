@@ -11,7 +11,7 @@ from discord.ui import View, Button, RoleSelect
 from openai import OpenAI
 from dotenv import load_dotenv
 
-from ac_recognise import check_proof   # ← import the new file
+from ac_recognise import check_proof
 
 load_dotenv()
 
@@ -54,6 +54,15 @@ user_points = load_json(POINTS_FILE, {})
 ac_enabled = load_json(AC_FILE, {})
 role_configs = load_json(ROLES_FILE, {})
 
+def load_ac_knowledge():
+    try:
+        with open("animal_company_knowledge.txt", "r", encoding="utf-8") as f:
+            return f.read()
+    except:
+        return "Animal Company is a popular free VR game on Meta Quest."
+
+AC_KNOWLEDGE = load_ac_knowledge()
+
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 intents = discord.Intents.default()
@@ -64,27 +73,20 @@ intents.dm_messages = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-AC_KNOWLEDGE = """
-You have deep knowledge of Animal Company VR.
-Official page: https://www.meta.com/experiences/animal-company/7190422614401072/
-
-- Free multiplayer VR survival game by Wooster Games
-- Players are customizable thick-cheeked animals
-- Adventure Mode (loot + monsters) and Arena Mode (6v6)
-- Tech Tree, Company Coins, Research Points, Stash
-- Very chaotic and popular on Meta Quest
-"""
-
 SYSTEM_PROMPT = f"""
-You are KingChat.
+You are KingChat, a Discord bot with attitude.
 
+Here is detailed knowledge about Animal Company:
 {AC_KNOWLEDGE}
 
-Be nice when people are nice. Be mean (but not too far) when people are rude.
-Keep replies very short (1-2 sentences). Talk like a real Discord user.
+Personality:
+- Be nice when people are nice
+- Be mean (but not too far) when people are rude
+- Keep replies short (1-2 sentences)
+- Talk like a real Discord user
+- Use your knowledge of Animal Company when relevant
 """
 
-# ========== VIEWS ==========
 class RoleSetupView(View):
     def __init__(self, guild_id):
         super().__init__(timeout=180)
@@ -136,7 +138,6 @@ class QuestStartView(View):
             return await interaction.response.send_message("Not your quest.", ephemeral=True)
         await interaction.response.edit_message(content="Okay.", embed=None, view=None)
 
-# ========== HELPERS ==========
 async def change_nickname(guild, mood):
     mood = mood.lower().strip()
     if mood not in NICKNAMES:
@@ -164,7 +165,6 @@ async def check_and_give_roles(member):
             except:
                 pass
 
-# ========== COMMANDS ==========
 @bot.command(name="stop")
 async def stop(ctx):
     if ctx.author.id != OWNER_ID:
@@ -190,13 +190,11 @@ async def points(interaction: discord.Interaction):
     pts = user_points.get(str(interaction.user.id), 0)
     await interaction.response.send_message(f"You have **{pts}** points.", ephemeral=True)
 
-# ========== MESSAGE HANDLER ==========
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # ===== Video Proof System =====
     if isinstance(message.channel, discord.DMChannel):
         user_id = str(message.author.id)
         if user_id in active_quests and message.attachments:
