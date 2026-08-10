@@ -120,15 +120,31 @@ class QuestStartView(View):
                 messages=[
                     {
                         "role": "system",
-                        "content": "Generate one very simple and clear Animal Company challenge. Examples: 'Dig 5 iron ore', 'Kill an Angler Fish', 'Sell 3 items', 'Survive 60 seconds'. Only output the challenge."
+                        "content": """You generate simple challenges for the VR game Animal Company.
+
+Only use real things that exist in Animal Company.
+Good examples:
+- Dig 5 iron ore
+- Kill an Angler Fish
+- Sell 3 items
+- Survive 60 seconds without dying
+- Find and pick up a flashlight
+- Kill a Smiley
+- Collect 5 pieces of loot
+- Use a walkie-talkie
+- Enter the Mines
+- Open your Stash
+
+Never invent items that don't exist (no pine cones, no apples, etc.).
+Only output the challenge, nothing else."""
                     },
                     {
                         "role": "user",
-                        "content": "Create a simple Animal Company challenge."
+                        "content": "Generate one simple and real Animal Company challenge."
                     }
                 ],
                 max_tokens=40,
-                temperature=0.9
+                temperature=0.7
             )
             task = res.choices[0].message.content.strip()
         except:
@@ -137,7 +153,7 @@ class QuestStartView(View):
         active_quests[str(self.user_id)] = {"task": task, "guild_id": self.guild_id}
         embed = discord.Embed(
             title="🎯 Your AC Quest",
-            description=f"**Challenge:**\n{task}\n\nSend any proof file (video/image) in this DM when ready.",
+            description=f"**Challenge:**\n{task}\n\nSend a video or screenshot as proof in this DM.",
             color=discord.Color.green()
         )
         await interaction.edit_original_response(embed=embed, view=None)
@@ -205,7 +221,7 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # ===== Proof System (accepts any file) =====
+    # Proof system
     if isinstance(message.channel, discord.DMChannel):
         user_id = str(message.author.id)
         if user_id in active_quests and message.attachments:
@@ -248,7 +264,6 @@ async def on_message(message: discord.Message):
 
     content = message.content.lower()
 
-    # AC Quest trigger
     if re.search(r"\bac\s*quest\b", content) and ac_enabled.get(str(message.guild.id), False):
         try:
             embed = discord.Embed(
@@ -263,7 +278,6 @@ async def on_message(message: discord.Message):
             await message.reply("I can't DM you.", mention_author=False)
         return
 
-    # Normal conversation
     is_called = bot.user.mentioned_in(message) or "kingchat" in content or "king chat" in content
     if not is_called and random.random() > 0.18:
         return
