@@ -2,11 +2,12 @@ import os
 import random
 import json
 import asyncio
+import re
 
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.ui import View, Button
+from discord.ui import View, Button, RoleSelect
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -33,7 +34,7 @@ toggles = {}
 ac_enabled = {}
 user_points = {}
 active_quests = {}
-role_configs = {}  # {guild_id: [role_id1, role_id2, ...]}  (15 roles)
+role_configs = {}  # {guild_id: [role_id1, role_id2, ...]}
 
 POINTS_FILE = "points.json"
 AC_FILE = "ac_settings.json"
@@ -64,18 +65,12 @@ intents.dm_messages = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ================= ANIMAL COMPANY KNOWLEDGE =================
 AC_KNOWLEDGE = """
 You know a lot about the VR game Animal Company (Meta Quest + SteamVR).
-
 - Free multiplayer social VR survival game by Wooster Games
-- Released July 2024, still Early Access
-- Extremely popular on Quest
 - Players are customizable thick-cheeked animals
-- Adventure Mode (co-op survival + monsters + loot) and Arena Mode (6v6 PvP)
-- Maps: haunted forests, labs, mines, lava caves, frozen lakes, nuclear zones
-- Features: physics toys, gadgets, tech tree, crafting, proximity chat, cosmetics
-- Very chaotic and memeable
+- Adventure Mode (survival + monsters) and Arena Mode (6v6 PvP)
+- Very chaotic, memeable, and popular on Quest
 """
 
 SYSTEM_PROMPT = f"""
@@ -90,7 +85,37 @@ Personality:
 - Talk like a real Discord user
 """
 
-# ================= VIEWS =================
+# ================= ROLE SELECT VIEW =================
+class RoleSetupView(View):
+    def __init__(self, guild_id):
+        super().__init__(timeout=180)
+        self.guild_id = guild_id
+
+    @discord.ui.select(
+        cls=RoleSelect,
+        placeholder="Select up to 15 roles (lowest → highest)",
+        min_values=1,
+        max_values=15
+    )
+    async def role_select(self, interaction: discord.Interaction, select: RoleSelect):
+        roles = select.values
+        # Sort roles by position (lowest first)
+        roles = sorted(roles, key=lambda r: r.position)
+
+        role_ids = [str(r.id) for r in roles]
+        role_configs[self.guild_id] = role_ids
+        save_json(ROLES_FILE, role_configs)
+
+        ac_enabled[self.guild_id] = True
+        save_json(AC_FILE, ac_enabled)
+
+        role_mentions = ", ".join([r.mention for r in roles])
+        await interaction.response.edit_message(
+            content=f"✅ Setup complete!\n\n**Roles in order:**\n{role_mentions}\n\nAC Quests are now enabled.",
+            view=None
+        )
+
+# ================= QUEST VIEWS =================
 class QuestStartView(View):
     def __init__(self, user_id, guild_id):
         super().__init__(timeout=120)
@@ -104,20 +129,19 @@ class QuestStartView(View):
 
         await interaction.response.defer()
 
-        # AI generates a unique quest
         try:
             response = client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": "You generate short, fun, doable challenges for the VR game Animal Company. Keep it 1 sentence."},
-                    {"role": "user", "content": "Generate one creative and fun challenge a player can do and record in Animal Company."}
+                    {"role": "system", "content": "Generate one short, fun, doable challenge for the VR game Animal Company. Only reply with the challenge sentence."},
+                    {"role": "user", "content": "Generate a creative Animal Company challenge."}
                 ],
-                max_tokens=60,
-                temperature=1.1
+                max_tokens=50,
+                temperature=1.2
             )
             task = response.choices[0].message.content.strip()
         except:
-            task = "Survive 2 minutes without dying and do a funny dance"
+            task = "Survive 2 minutes and do something funny"
 
         active_quests[str(self.user_id)] = {
             "task": task,
@@ -126,11 +150,10 @@ class QuestStartView(View):
 
         embed = discord.Embed(
             title="🎯 Your AC Quest",
-            description=f"**Your challenge:**\n{task}\n\nRecord yourself doing this, then click **Send Proof** and upload the video here.",
+            description=f"**Challenge:**\n{task}\n\nRecord it, then click **Send Proof** and upload the video here.",
             color=discord.Color.green()
         )
-        view = ProofView(self.user_id)
-        await interaction.edit_original_response(embed=embed, view=view)
+        await interaction.edit_original_response(embed=embed, view=ProofView(self.user_id))
 
     @discord.ui.button(label="No", style=discord.ButtonStyle.red)
     async def no_button(self, interaction: discord.Interaction, button: Button):
@@ -170,24 +193,21 @@ async def check_and_give_roles(member: discord.Member):
     roles = role_configs[guild_id]
 
     for i, role_id in enumerate(roles):
-        required = (i + 1) * 10  # 10, 20, 30 ... 150
+        required = (i + 1) * 10
         role = member.guild.get_role(int(role_id))
         if not role:
             continue
 
-        if points >= required:
-            if role not in member.roles:
-                try:
-                    await member.add_roles(role)
-                    print(f"Gave {role.name} to {member}")
-                except:
-                    pass
-        else:
-            if role in member.roles:
-                try:
-                    await member.remove_roles(role)
-                except:
-                    pass
+        if points >= required and role not in member.roles:
+            try:
+                await member.add_roles(role)
+            except:
+                pass
+        elif points < required and role in member.roles:
+            try:
+                await member.remove_roles(role)
+            except:
+                pass
 
 # ================= COMMANDS =================
 @bot.command(name="stop")
@@ -204,33 +224,15 @@ async def start(ctx):
     toggles[str(ctx.guild.id)] = True
     await ctx.send("🟢 Bot started.")
 
-@bot.tree.command(name="setup", description="Setup the 15 AC Quest roles for this server")
+@bot.tree.command(name="setup", description="Setup AC Quest roles (1-15 roles)")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup(interaction: discord.Interaction):
+    view = RoleSetupView(str(interaction.guild_id))
     await interaction.response.send_message(
-        "Please send the **15 role IDs** in order (from lowest to highest), separated by spaces.\n"
-        "Example: `123 456 789 ...` (exactly 15 IDs)\n\n"
-        "You have 60 seconds.",
+        "Select **1 to 15 roles** from the dropdown below (order = lowest to highest reward):",
+        view=view,
         ephemeral=True
     )
-
-    def check(m):
-        return m.author.id == interaction.user.id and m.channel.id == interaction.channel.id
-
-    try:
-        msg = await bot.wait_for("message", check=check, timeout=60)
-        ids = msg.content.strip().split()
-        if len(ids) != 15:
-            return await interaction.followup.send("You must provide exactly 15 role IDs.", ephemeral=True)
-
-        role_configs[str(interaction.guild_id)] = ids
-        save_json(ROLES_FILE, role_configs)
-        ac_enabled[str(interaction.guild_id)] = True
-        save_json(AC_FILE, ac_enabled)
-
-        await interaction.followup.send("✅ Successfully set up 15 roles + enabled AC Quests!", ephemeral=True)
-    except asyncio.TimeoutError:
-        await interaction.followup.send("Timed out.", ephemeral=True)
 
 # ================= MESSAGE HANDLER =================
 @bot.event
@@ -238,7 +240,7 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # ===== Handle Proof Videos in DMs =====
+    # Handle proof videos in DMs
     if isinstance(message.channel, discord.DMChannel):
         user_id = str(message.author.id)
         if user_id in active_quests and message.attachments:
@@ -247,9 +249,8 @@ async def on_message(message: discord.Message):
                     user_points[user_id] = user_points.get(user_id, 0) + 10
                     save_json(POINTS_FILE, user_points)
 
-                    # Try to give roles if we know the guild
                     guild_id = active_quests[user_id].get("guild_id")
-                    if guild_id and guild_id != "dm":
+                    if guild_id and guild_id.isdigit():
                         guild = bot.get_guild(int(guild_id))
                         if guild:
                             member = guild.get_member(message.author.id)
@@ -258,8 +259,7 @@ async def on_message(message: discord.Message):
 
                     del active_quests[user_id]
                     await message.channel.send(
-                        f"✅ Proof accepted! You earned **+10 points**.\n"
-                        f"Total points: **{user_points[user_id]}**"
+                        f"✅ Proof accepted! **+10 points**\nTotal: **{user_points[user_id]}**"
                     )
                     return
 
@@ -273,8 +273,8 @@ async def on_message(message: discord.Message):
 
     content = message.content.lower()
 
-    # ===== AC QUEST TRIGGER =====
-    if "ac quest" in content and ac_enabled.get(str(message.guild.id), False):
+    # Flexible AC Quest trigger
+    if re.search(r"\bac\s*quest\b", content) and ac_enabled.get(str(message.guild.id), False):
         try:
             embed = discord.Embed(
                 title="🎮 AC Quest",
@@ -285,10 +285,10 @@ async def on_message(message: discord.Message):
             await message.author.send(embed=embed, view=view)
             await message.reply("Check your DMs!", mention_author=False)
         except discord.Forbidden:
-            await message.reply("I can't DM you. Enable DMs from server members.", mention_author=False)
+            await message.reply("I can't DM you. Please enable DMs.", mention_author=False)
         return
 
-    # ===== Normal talking =====
+    # Normal reply logic
     is_called = (
         bot.user.mentioned_in(message)
         or "kingchat" in content
@@ -312,7 +312,7 @@ async def on_message(message: discord.Message):
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {
                         "role": "user",
-                        "content": f"Recent chat:\n" + "\n".join(history) + f"\n\n{message.author.display_name}: {message.content}\n\nReply as KingChat (1-2 sentences). Also pick mood: happy/mad/neutral\n\nFormat:\nMOOD: neutral\nREPLY: your message"
+                        "content": f"Recent chat:\n" + "\n".join(history) + f"\n\n{message.author.display_name}: {message.content}\n\nReply as KingChat (1-2 sentences).\n\nFormat:\nMOOD: neutral\nREPLY: your message"
                     }
                 ],
                 max_tokens=90,
