@@ -11,7 +11,6 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 async def check_proof(file_url: str, quest_text: str, filename: str = "") -> tuple[bool, str]:
     try:
-        # Download the file
         async with aiohttp.ClientSession() as session:
             async with session.get(file_url) as resp:
                 if resp.status != 200:
@@ -19,7 +18,6 @@ async def check_proof(file_url: str, quest_text: str, filename: str = "") -> tup
                 file_data = await resp.read()
 
         with tempfile.TemporaryDirectory() as tmp:
-            # Save file
             ext = ".mp4"
             if filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
                 ext = ".jpg"
@@ -30,11 +28,9 @@ async def check_proof(file_url: str, quest_text: str, filename: str = "") -> tup
 
             frames = []
 
-            # If it's an image, just use it
             if ext == ".jpg":
                 frames.append(file_path)
             else:
-                # Extract frames from video using ffmpeg
                 for i, timestamp in enumerate(["00:00:01", "00:00:03", "00:00:06", "00:00:09"]):
                     frame_path = os.path.join(tmp, f"frame_{i}.jpg")
                     cmd = [
@@ -45,27 +41,23 @@ async def check_proof(file_url: str, quest_text: str, filename: str = "") -> tup
                         "-q:v", "2",
                         frame_path
                     ]
-                    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     if os.path.exists(frame_path):
                         frames.append(frame_path)
 
             if not frames:
-                return False, "Could not extract any frames from the video. Make sure it's a valid video."
+                return False, "Could not extract frames from the video."
 
-            # Build vision prompt
             content = [
                 {
                     "type": "text",
                     "text": f"""You are verifying proof for an Animal Company VR quest.
 
-Quest the player must complete: "{quest_text}"
+Quest: "{quest_text}"
 
-Look carefully at the frames from their video/screenshot.
-Decide if this is real proof that they completed the quest inside Animal Company.
-
-Be strict:
-- Reject random photos, selfies, memes, or unrelated content
-- Accept only if it clearly shows gameplay related to the quest
+Look at the frames carefully.
+Only accept if it clearly shows real Animal Company gameplay related to the quest.
+Reject selfies, random photos, memes, or unrelated content.
 
 Reply in this exact format:
 VALID: yes
@@ -78,14 +70,12 @@ REASON: short reason"""
                 }
             ]
 
-            for frame in frames[:4]:  # max 4 frames
+            for frame in frames[:4]:
                 with open(frame, "rb") as img_file:
                     b64 = base64.b64encode(img_file.read()).decode("utf-8")
                 content.append({
                     "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{b64}"
-                    }
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
                 })
 
             response = client.chat.completions.create(
@@ -104,4 +94,4 @@ REASON: short reason"""
                 return False, reason
 
     except Exception as e:
-        return False, f"Error while checking: {str(e)}"
+        return False, f"Error: {str(e)}"
