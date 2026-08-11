@@ -31,13 +31,12 @@ NICKNAMES = {
     "neutral": "Kingchat😐"
 }
 
-# Data
 toggles = {}
 ac_enabled = {}
 user_points = {}
 active_quests = {}
-role_configs = {}       # {guild_id: [{"role_id": "...", "points": 10}, ...]}
-points_per_quest = {}   # {guild_id: 5}
+role_configs = {}          # {guild_id: {"1": "role_id", "2": "role_id", ...}}
+points_per_quest = {}      # {guild_id: 5}
 
 POINTS_FILE = "points.json"
 AC_FILE = "ac_settings.json"
@@ -91,81 +90,66 @@ Personality:
 - Use your knowledge of Animal Company when relevant
 """
 
-# ================= MODALS & VIEWS =================
+# ================= SETUP SYSTEM =================
 
 class PointsModal(Modal, title="Set Points Per Quest"):
-    points_input = TextInput(label="Points given per completed quest", placeholder="Example: 5", required=True)
+    points_input = TextInput(label="How many points per quest?", placeholder="Example: 5", required=True)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
             value = int(self.points_input.value)
             if value < 1:
-                return await interaction.response.send_message("Points must be at least 1.", ephemeral=True)
-            
+                return await interaction.response.send_message("Must be at least 1.", ephemeral=True)
             points_per_quest[str(interaction.guild_id)] = value
             save_json(POINTS_QUEST_FILE, points_per_quest)
             await interaction.response.send_message(f"✅ Each quest now gives **{value} points**.", ephemeral=True)
         except:
             await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
 
-class RoleSetupView(View):
-    def __init__(self, guild_id):
-        super().__init__(timeout=180)
+class LevelRoleView(View):
+    def __init__(self, guild_id: str, level: int):
+        super().__init__(timeout=120)
         self.guild_id = guild_id
+        self.level = level
 
-    @discord.ui.select(cls=RoleSelect, placeholder="Select roles (you will set points next)", min_values=1, max_values=15)
-    async def select_roles(self, interaction: discord.Interaction, select: RoleSelect):
-        roles = sorted(select.values, key=lambda r: r.position)
-        
-        # Ask for point thresholds
-        await interaction.response.send_message(
-            "Now type the required points for each role in order (separated by spaces).\n"
-            f"You selected {len(roles)} roles.\n"
-            "Example: `10 25 50 100`",
-            ephemeral=True
+    @discord.ui.select(cls=RoleSelect, placeholder="Select the role for this level", min_values=1, max_values=1)
+    async def select_role(self, interaction: discord.Interaction, select: RoleSelect):
+        role = select.values[0]
+
+        if self.guild_id not in role_configs:
+            role_configs[self.guild_id] = {}
+
+        role_configs[self.guild_id][str(self.level)] = str(role.id)
+        save_json(ROLES_FILE, role_configs)
+        ac_enabled[self.guild_id] = True
+        save_json(AC_FILE, ac_enabled)
+
+        await interaction.response.edit_message(
+            content=f"✅ **Level {self.level}** is now set to {role.mention}",
+            view=None
         )
 
-        def check(m):
-            return m.author.id == interaction.user.id and m.channel.id == interaction.channel.id
-
-        try:
-            msg = await bot.wait_for("message", check=check, timeout=60)
-            values = msg.content.strip().split()
-            
-            if len(values) != len(roles):
-                return await interaction.followup.send(f"You need to give exactly {len(roles)} numbers.", ephemeral=True)
-
-            config = []
-            for role, pts in zip(roles, values):
-                config.append({
-                    "role_id": str(role.id),
-                    "points": int(pts)
-                })
-
-            role_configs[self.guild_id] = config
-            save_json(ROLES_FILE, role_configs)
-            ac_enabled[self.guild_id] = True
-            save_json(AC_FILE, ac_enabled)
-
-            text = "\n".join([f"• {r.mention} → **{c['points']} points**" for r, c in zip(roles, config)])
-            await interaction.followup.send(f"✅ Roles configured:\n{text}", ephemeral=True)
-
-        except Exception as e:
-            await interaction.followup.send("Failed or timed out. Please try `/setup` again.", ephemeral=True)
-
 class SetupView(View):
-    def __init__(self, guild_id):
-        super().__init__(timeout=120)
+    def __init__(self, guild_id: str):
+        super().__init__(timeout=180)
         self.guild_id = guild_id
 
     @discord.ui.button(label="Set Points Per Quest", style=discord.ButtonStyle.blurple)
     async def set_points(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PointsModal())
 
-    @discord.ui.button(label="Set Roles & Levels", style=discord.ButtonStyle.green)
-    async def set_roles(self, interaction: discord.Interaction, button: Button):
-        view = RoleSetupView(self.guild_id)
-        await interaction.response.send_message("Select the roles:", view=view, ephemeral=True)
+    @discord.ui.select(
+        placeholder="Choose a level to assign a role...",
+        options=[discord.SelectOption(label=f"Level {i}", value=str(i)) for i in range(1, 16)]
+    )
+    async def select_level(self, interaction: discord.Interaction, select: discord.ui.Select):
+        level = int(select.values[0])
+        view = LevelRoleView(self.guild_id, level)
+        await interaction.response.send_message(
+            f"Select the role for **Level {level}**:",
+            view=view,
+            ephemeral=True
+        )
 
 class QuestStartView(View):
     def __init__(self, user_id, guild_id):
@@ -217,7 +201,7 @@ Only output the challenge, nothing else."""
         embed = discord.Embed(
             title="🎯 Your AC Quest",
             description=f"**Challenge:**\n{task}\n\nSend a video or screenshot as proof in this DM.",
-            color=0x9B59B6  # Purple
+            color=0x9B59B6
         )
         await interaction.edit_original_response(embed=embed, view=None)
 
@@ -246,11 +230,14 @@ async def check_and_give_roles(member):
         return
 
     points = user_points.get(str(member.id), 0)
+    pts_per_quest = points_per_quest.get(guild_id, 5)
     config = role_configs[guild_id]
 
-    for item in config:
-        role = member.guild.get_role(int(item["role_id"]))
-        required = item["points"]
+    for level_str, role_id in config.items():
+        level = int(level_str)
+        required = level * pts_per_quest
+
+        role = member.guild.get_role(int(role_id))
         if not role:
             continue
 
@@ -281,13 +268,17 @@ async def start(ctx):
     toggles[str(ctx.guild.id)] = True
     await ctx.send("🟢 Bot started.")
 
-@bot.tree.command(name="setup", description="Setup AC Quest system")
+@bot.tree.command(name="setup", description="Setup AC Quest roles and points")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup(interaction: discord.Interaction):
     embed = discord.Embed(
         title="⚙️ AC Quest Setup",
-        description="Choose what you want to configure:",
-        color=0x3498DB  # Blue
+        description=(
+            "**1.** Set how many points each quest gives\n"
+            "**2.** Choose a Level (1-15) and assign a role to it\n\n"
+            "Level 1 = lowest role\nLevel 15 = highest role"
+        ),
+        color=0x3498DB
     )
     view = SetupView(str(interaction.guild_id))
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -298,7 +289,7 @@ async def points(interaction: discord.Interaction):
     embed = discord.Embed(
         title="🏆 Your Points",
         description=f"You currently have **{pts}** points.",
-        color=0xF1C40F  # Gold
+        color=0xF1C40F
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -346,14 +337,14 @@ async def on_message(message: discord.Message):
                 embed = discord.Embed(
                     title="✅ Proof Accepted!",
                     description=f"**+{pts_to_add} points**\nReason: {reason}\n\nTotal points: **{user_points[user_id]}**",
-                    color=0x2ECC71  # Green
+                    color=0x2ECC71
                 )
                 await message.channel.send(embed=embed)
             else:
                 embed = discord.Embed(
                     title="❌ Proof Rejected",
                     description=f"Reason: {reason}\n\nTry again.",
-                    color=0xE74C3C  # Red
+                    color=0xE74C3C
                 )
                 await message.channel.send(embed=embed)
             return
@@ -373,7 +364,7 @@ async def on_message(message: discord.Message):
             embed = discord.Embed(
                 title="🎮 AC Quest",
                 description="You ready for your AC Quest?",
-                color=0x9B59B6  # Purple
+                color=0x9B59B6
             )
             view = QuestStartView(message.author.id, str(message.guild.id))
             await message.author.send(embed=embed, view=view)
