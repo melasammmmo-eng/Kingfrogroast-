@@ -31,7 +31,6 @@ NICKNAMES = {
     "neutral": "Kingchat😐"
 }
 
-# ========== GUARANTEED MEMORY ==========
 MEMORY_FILE = "/app/data/memory.json"
 
 def load_memory():
@@ -60,7 +59,6 @@ def save_memory():
         json.dump(data, f, indent=2)
 
 memory = load_memory()
-
 toggles = memory.get("toggles", {})
 ac_enabled = memory.get("ac_enabled", {})
 user_points = memory.get("user_points", {})
@@ -73,7 +71,7 @@ def load_ac_knowledge():
         with open("animal_company_knowledge.txt", "r", encoding="utf-8") as f:
             return f.read()
     except:
-        return "Animal Company is a popular free VR game on Meta Quest."
+        return "Animal Company is a free multiplayer VR survival game on Meta Quest by Wooster Games."
 
 AC_KNOWLEDGE = load_ac_knowledge()
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -89,7 +87,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 SYSTEM_PROMPT = f"""
 You are KingChat, a Discord bot with attitude.
 
-Here is detailed knowledge about Animal Company:
+You have deep knowledge of the VR game Animal Company:
 {AC_KNOWLEDGE}
 
 Personality:
@@ -100,7 +98,7 @@ Personality:
 - Use your knowledge of Animal Company when relevant
 """
 
-# ================= SETUP SYSTEM =================
+# ================= SETUP =================
 
 class PointsModal(Modal, title="Set Points Per Quest"):
     points_input = TextInput(label="How many points per quest?", placeholder="Example: 5", required=True)
@@ -110,7 +108,6 @@ class PointsModal(Modal, title="Set Points Per Quest"):
             value = int(self.points_input.value)
             if value < 1:
                 return await interaction.response.send_message("Must be at least 1.", ephemeral=True)
-            
             points_per_quest[str(interaction.guild_id)] = value
             save_memory()
             await interaction.response.send_message(f"✅ Each quest now gives **{value} points**.", ephemeral=True)
@@ -126,16 +123,13 @@ class LevelRoleView(View):
     @discord.ui.select(cls=RoleSelect, placeholder="Select the role for this level", min_values=1, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: RoleSelect):
         role = select.values[0]
-
         if self.guild_id not in role_configs:
             role_configs[self.guild_id] = {}
-
         role_configs[self.guild_id][str(self.level)] = str(role.id)
         ac_enabled[self.guild_id] = True
         save_memory()
-
         await interaction.response.edit_message(
-            content=f"✅ **Level {self.level}** is now set to {role.mention}",
+            content=f"✅ **Level {self.level}** → {role.mention}",
             view=None
         )
 
@@ -179,32 +173,26 @@ class QuestStartView(View):
                 messages=[
                     {
                         "role": "system",
-                        "content": """You generate simple challenges for the VR game Animal Company.
+                        "content": f"""You are an expert on the VR game Animal Company.
 
-Only use real things that exist in Animal Company.
-Good examples:
-- Dig 5 iron ore
-- Kill an Angler Fish
-- Sell 3 items
-- Survive 60 seconds without dying
-- Find and pick up a flashlight
-- Kill a Smiley
-- Collect 5 pieces of loot
-- Use a walkie-talkie
-- Enter the Mines
-- Open your Stash
+{AC_KNOWLEDGE}
 
-Never invent items that don't exist.
-Only output the challenge, nothing else."""
+Generate one short, simple, and realistic challenge that a player can actually do and record in Animal Company.
+Only use real features, items, monsters, and actions from the game.
+Do not invent anything that doesn't exist.
+Only output the challenge sentence, nothing else."""
                     },
-                    {"role": "user", "content": "Generate one simple and real Animal Company challenge."}
+                    {
+                        "role": "user",
+                        "content": "Generate one realistic Animal Company challenge."
+                    }
                 ],
-                max_tokens=40,
-                temperature=0.7
+                max_tokens=45,
+                temperature=0.8
             )
             task = res.choices[0].message.content.strip()
         except:
-            task = "Dig 5 iron ore"
+            task = "Dig some iron ore"
 
         active_quests[str(self.user_id)] = {"task": task, "guild_id": self.guild_id}
 
@@ -246,11 +234,9 @@ async def check_and_give_roles(member):
     for level_str, role_id in config.items():
         level = int(level_str)
         required = level * pts_per_quest
-
         role = member.guild.get_role(int(role_id))
         if not role:
             continue
-
         if points >= required and role not in member.roles:
             try:
                 await member.add_roles(role)
@@ -287,8 +273,7 @@ async def setup(interaction: discord.Interaction):
         title="⚙️ AC Quest Setup",
         description=(
             "**1.** Set how many points each quest gives\n"
-            "**2.** Choose a Level (1-15) and assign a role to it\n\n"
-            "Level 1 = lowest role\nLevel 15 = highest role"
+            "**2.** Choose a Level (1-15) and assign a role to it"
         ),
         color=0x3498DB
     )
@@ -327,7 +312,6 @@ async def on_message(message: discord.Message):
             guild_id = active_quests[user_id]["guild_id"]
 
             await message.channel.send("Checking your proof... please wait.")
-
             is_valid, reason = await check_proof(att.url, quest, att.filename)
 
             if is_valid:
@@ -343,17 +327,16 @@ async def on_message(message: discord.Message):
                             await check_and_give_roles(member)
 
                 del active_quests[user_id]
-
                 embed = discord.Embed(
                     title="✅ Proof Accepted!",
-                    description=f"**+{pts_to_add} points**\nReason: {reason}\n\nTotal points: **{user_points[user_id]}**",
+                    description=f"**+{pts_to_add} points**\nReason: {reason}\n\nTotal: **{user_points[user_id]}**",
                     color=0x2ECC71
                 )
                 await message.channel.send(embed=embed)
             else:
                 embed = discord.Embed(
                     title="❌ Proof Rejected",
-                    description=f"Reason: {reason}\n\nTry again.",
+                    description=f"Reason: {reason}\nTry again.",
                     color=0xE74C3C
                 )
                 await message.channel.send(embed=embed)
@@ -416,7 +399,6 @@ async def on_message(message: discord.Message):
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
-    print("Guaranteed memory system active")
     await bot.tree.sync()
 
 if __name__ == "__main__":
