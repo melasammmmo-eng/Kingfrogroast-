@@ -18,6 +18,7 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID"))
+RACIST_PERSON = os.getenv("RACIST_PERSON")  # <-- Add this in .env
 
 MODEL = "gpt-4o"
 
@@ -219,6 +220,14 @@ async def points(interaction: discord.Interaction):
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
+        return
+
+    # ===== BLOCK RACIST PERSON =====
+    if RACIST_PERSON and str(message.author.id) == str(RACIST_PERSON):
+        try:
+            await message.reply("I don’t talk to racist Ik what u did bum🥀", mention_author=False)
+        except:
+            pass
         return
 
     # Proof system
