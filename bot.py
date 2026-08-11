@@ -31,32 +31,42 @@ NICKNAMES = {
     "neutral": "Kingchat😐"
 }
 
-toggles = {}
-ac_enabled = {}
-user_points = {}
-active_quests = {}
-role_configs = {}          # {guild_id: {"1": "role_id", "2": "role_id", ...}}
-points_per_quest = {}      # {guild_id: 5}
+# ========== GUARANTEED MEMORY ==========
+MEMORY_FILE = "/app/data/memory.json"
 
-POINTS_FILE = "points.json"
-AC_FILE = "ac_settings.json"
-ROLES_FILE = "roles.json"
-POINTS_QUEST_FILE = "points_per_quest.json"
-
-def load_json(file, default):
-    if os.path.exists(file):
-        with open(file, "r") as f:
+def load_memory():
+    os.makedirs("/app/data", exist_ok=True)
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
             return json.load(f)
-    return default
+    return {
+        "toggles": {},
+        "ac_enabled": {},
+        "user_points": {},
+        "role_configs": {},
+        "points_per_quest": {}
+    }
 
-def save_json(file, data):
-    with open(file, "w") as f:
+def save_memory():
+    os.makedirs("/app/data", exist_ok=True)
+    data = {
+        "toggles": toggles,
+        "ac_enabled": ac_enabled,
+        "user_points": user_points,
+        "role_configs": role_configs,
+        "points_per_quest": points_per_quest
+    }
+    with open(MEMORY_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
-user_points = load_json(POINTS_FILE, {})
-ac_enabled = load_json(AC_FILE, {})
-role_configs = load_json(ROLES_FILE, {})
-points_per_quest = load_json(POINTS_QUEST_FILE, {})
+memory = load_memory()
+
+toggles = memory.get("toggles", {})
+ac_enabled = memory.get("ac_enabled", {})
+user_points = memory.get("user_points", {})
+role_configs = memory.get("role_configs", {})
+points_per_quest = memory.get("points_per_quest", {})
+active_quests = {}
 
 def load_ac_knowledge():
     try:
@@ -100,8 +110,9 @@ class PointsModal(Modal, title="Set Points Per Quest"):
             value = int(self.points_input.value)
             if value < 1:
                 return await interaction.response.send_message("Must be at least 1.", ephemeral=True)
+            
             points_per_quest[str(interaction.guild_id)] = value
-            save_json(POINTS_QUEST_FILE, points_per_quest)
+            save_memory()
             await interaction.response.send_message(f"✅ Each quest now gives **{value} points**.", ephemeral=True)
         except:
             await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
@@ -120,9 +131,8 @@ class LevelRoleView(View):
             role_configs[self.guild_id] = {}
 
         role_configs[self.guild_id][str(self.level)] = str(role.id)
-        save_json(ROLES_FILE, role_configs)
         ac_enabled[self.guild_id] = True
-        save_json(AC_FILE, ac_enabled)
+        save_memory()
 
         await interaction.response.edit_message(
             content=f"✅ **Level {self.level}** is now set to {role.mention}",
@@ -259,6 +269,7 @@ async def stop(ctx):
     if ctx.author.id != OWNER_ID:
         return
     toggles[str(ctx.guild.id)] = False
+    save_memory()
     await ctx.send("🛑 Bot stopped.")
 
 @bot.command(name="start")
@@ -266,6 +277,7 @@ async def start(ctx):
     if ctx.author.id != OWNER_ID:
         return
     toggles[str(ctx.guild.id)] = True
+    save_memory()
     await ctx.send("🟢 Bot started.")
 
 @bot.tree.command(name="setup", description="Setup AC Quest roles and points")
@@ -300,7 +312,6 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # Block racist person
     if RACIST_PERSON and str(message.author.id) == str(RACIST_PERSON):
         try:
             await message.reply("I don’t talk to racist Ik what u did bum🥀", mention_author=False)
@@ -308,7 +319,6 @@ async def on_message(message: discord.Message):
             pass
         return
 
-    # Proof system
     if isinstance(message.channel, discord.DMChannel):
         user_id = str(message.author.id)
         if user_id in active_quests and message.attachments:
@@ -323,7 +333,7 @@ async def on_message(message: discord.Message):
             if is_valid:
                 pts_to_add = points_per_quest.get(guild_id, 5)
                 user_points[user_id] = user_points.get(user_id, 0) + pts_to_add
-                save_json(POINTS_FILE, user_points)
+                save_memory()
 
                 if guild_id.isdigit():
                     guild = bot.get_guild(int(guild_id))
@@ -406,6 +416,7 @@ async def on_message(message: discord.Message):
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
+    print("Guaranteed memory system active")
     await bot.tree.sync()
 
 if __name__ == "__main__":
