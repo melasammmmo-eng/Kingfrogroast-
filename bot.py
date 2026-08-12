@@ -31,7 +31,6 @@ NICKNAMES = {
     "neutral": "Kingchat😐"
 }
 
-# N-word detection patterns
 NWORD_PATTERNS = [
     r"\bn[i1]gg[ae3]r?\b",
     r"\bn[i1]gga\b",
@@ -268,45 +267,53 @@ async def points(interaction: discord.Interaction):
     embed = discord.Embed(title="🏆 Your Points", description=f"You have **{pts}** points.", color=0xF1C40F)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="clearbot", description="Delete all my messages in this channel (Owner only)")
+@bot.tree.command(name="clearbot", description="Delete my messages in this channel (Owner only)")
 async def clearbot(interaction: discord.Interaction):
     if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message("Only the owner can use this.", ephemeral=True)
-    
-    await interaction.response.send_message("Cleaning my messages in this channel...", ephemeral=True)
+
+    await interaction.response.send_message("Cleaning my messages in this channel... (slow to avoid rate limits)", ephemeral=True)
+
     deleted = 0
-    async for msg in interaction.channel.history(limit=500):
+    async for msg in interaction.channel.history(limit=200):
         if msg.author.id == bot.user.id:
             try:
                 await msg.delete()
                 deleted += 1
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.7)
             except:
-                pass
-    await interaction.followup.send(f"✅ Deleted **{deleted}** of my messages.", ephemeral=True)
+                await asyncio.sleep(1.5)
+                continue
 
-@bot.tree.command(name="clearbotserver", description="Delete all my messages in the entire server (Owner only)")
+    await interaction.followup.send(f"✅ Deleted **{deleted}** of my messages in this channel.", ephemeral=True)
+
+@bot.tree.command(name="clearbotserver", description="Delete my messages in the whole server (Owner only)")
 async def clearbotserver(interaction: discord.Interaction):
     if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message("Only the owner can use this.", ephemeral=True)
-    
-    await interaction.response.send_message("Cleaning my messages across the server... This may take a while.", ephemeral=True)
+
+    await interaction.response.send_message(
+        "Cleaning my messages across the server...\nThis is **very slow** on purpose to avoid rate limits.",
+        ephemeral=True
+    )
+
     total_deleted = 0
 
     for channel in interaction.guild.text_channels:
         try:
-            async for msg in channel.history(limit=300):
+            async for msg in channel.history(limit=100):
                 if msg.author.id == bot.user.id:
                     try:
                         await msg.delete()
                         total_deleted += 1
-                        await asyncio.sleep(0.35)
+                        await asyncio.sleep(0.8)
                     except:
-                        pass
+                        await asyncio.sleep(2)
+                        continue
         except:
             continue
 
-    await interaction.followup.send(f"✅ Deleted **{total_deleted}** of my messages in the server.", ephemeral=True)
+    await interaction.followup.send(f"✅ Finished. Deleted **{total_deleted}** of my messages across the server.", ephemeral=True)
 
 # ================= MESSAGE HANDLER =================
 
