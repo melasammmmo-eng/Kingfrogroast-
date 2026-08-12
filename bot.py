@@ -31,6 +31,15 @@ NICKNAMES = {
     "neutral": "Kingchat😐"
 }
 
+# N-word detection patterns
+NWORD_PATTERNS = [
+    r"\bn[i1]gg[ae3]r?\b",
+    r"\bn[i1]gga\b",
+    r"\bn[i1]gg\b",
+    r"\bn-word\b",
+    r"\bn word\b"
+]
+
 MEMORY_FILE = "/app/data/memory.json"
 
 def load_memory():
@@ -71,7 +80,7 @@ def load_ac_knowledge():
         with open("animal_company_knowledge.txt", "r", encoding="utf-8") as f:
             return f.read()
     except:
-        return "Animal Company is a free multiplayer VR survival game on Meta Quest by Wooster Games."
+        return "Animal Company is a free multiplayer VR survival game on Meta Quest."
 
 AC_KNOWLEDGE = load_ac_knowledge()
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -87,7 +96,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 SYSTEM_PROMPT = f"""
 You are KingChat, a Discord bot with attitude.
 
-You have deep knowledge of the VR game Animal Company:
+You have deep knowledge of Animal Company:
 {AC_KNOWLEDGE}
 
 Personality:
@@ -95,10 +104,9 @@ Personality:
 - Be mean (but not too far) when people are rude
 - Keep replies short (1-2 sentences)
 - Talk like a real Discord user
-- Use your knowledge of Animal Company when relevant
 """
 
-# ================= SETUP =================
+# ================= SETUP SYSTEM =================
 
 class PointsModal(Modal, title="Set Points Per Quest"):
     points_input = TextInput(label="How many points per quest?", placeholder="Example: 5", required=True)
@@ -128,10 +136,7 @@ class LevelRoleView(View):
         role_configs[self.guild_id][str(self.level)] = str(role.id)
         ac_enabled[self.guild_id] = True
         save_memory()
-        await interaction.response.edit_message(
-            content=f"✅ **Level {self.level}** → {role.mention}",
-            view=None
-        )
+        await interaction.response.edit_message(content=f"✅ **Level {self.level}** → {role.mention}", view=None)
 
 class SetupView(View):
     def __init__(self, guild_id: str):
@@ -149,11 +154,7 @@ class SetupView(View):
     async def select_level(self, interaction: discord.Interaction, select: discord.ui.Select):
         level = int(select.values[0])
         view = LevelRoleView(self.guild_id, level)
-        await interaction.response.send_message(
-            f"Select the role for **Level {level}**:",
-            view=view,
-            ephemeral=True
-        )
+        await interaction.response.send_message(f"Select the role for **Level {level}**:", view=view, ephemeral=True)
 
 class QuestStartView(View):
     def __init__(self, user_id, guild_id):
@@ -173,19 +174,15 @@ class QuestStartView(View):
                 messages=[
                     {
                         "role": "system",
-                        "content": f"""You are an expert on the VR game Animal Company.
+                        "content": f"""You are an expert on Animal Company VR.
 
 {AC_KNOWLEDGE}
 
-Generate one short, simple, and realistic challenge that a player can actually do and record in Animal Company.
-Only use real features, items, monsters, and actions from the game.
-Do not invent anything that doesn't exist.
-Only output the challenge sentence, nothing else."""
+Generate one short, simple, realistic challenge a player can do and record in Animal Company.
+Only use real things from the game. Do not invent items.
+Only output the challenge, nothing else."""
                     },
-                    {
-                        "role": "user",
-                        "content": "Generate one realistic Animal Company challenge."
-                    }
+                    {"role": "user", "content": "Generate one realistic Animal Company challenge."}
                 ],
                 max_tokens=45,
                 temperature=0.8
@@ -195,12 +192,7 @@ Only output the challenge sentence, nothing else."""
             task = "Dig some iron ore"
 
         active_quests[str(self.user_id)] = {"task": task, "guild_id": self.guild_id}
-
-        embed = discord.Embed(
-            title="🎯 Your AC Quest",
-            description=f"**Challenge:**\n{task}\n\nSend a video or screenshot as proof in this DM.",
-            color=0x9B59B6
-        )
+        embed = discord.Embed(title="🎯 Your AC Quest", description=f"**Challenge:**\n{task}\n\nSend proof in this DM.", color=0x9B59B6)
         await interaction.edit_original_response(embed=embed, view=None)
 
     @discord.ui.button(label="No", style=discord.ButtonStyle.red)
@@ -226,12 +218,9 @@ async def check_and_give_roles(member):
     guild_id = str(member.guild.id)
     if guild_id not in role_configs:
         return
-
     points = user_points.get(str(member.id), 0)
     pts_per_quest = points_per_quest.get(guild_id, 5)
-    config = role_configs[guild_id]
-
-    for level_str, role_id in config.items():
+    for level_str, role_id in role_configs[guild_id].items():
         level = int(level_str)
         required = level * pts_per_quest
         role = member.guild.get_role(int(role_id))
@@ -269,26 +258,55 @@ async def start(ctx):
 @bot.tree.command(name="setup", description="Setup AC Quest roles and points")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="⚙️ AC Quest Setup",
-        description=(
-            "**1.** Set how many points each quest gives\n"
-            "**2.** Choose a Level (1-15) and assign a role to it"
-        ),
-        color=0x3498DB
-    )
+    embed = discord.Embed(title="⚙️ AC Quest Setup", description="Set points per quest and assign roles to levels.", color=0x3498DB)
     view = SetupView(str(interaction.guild_id))
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 @bot.tree.command(name="points", description="Check your points")
 async def points(interaction: discord.Interaction):
     pts = user_points.get(str(interaction.user.id), 0)
-    embed = discord.Embed(
-        title="🏆 Your Points",
-        description=f"You currently have **{pts}** points.",
-        color=0xF1C40F
-    )
+    embed = discord.Embed(title="🏆 Your Points", description=f"You have **{pts}** points.", color=0xF1C40F)
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="clearbot", description="Delete all my messages in this channel (Owner only)")
+async def clearbot(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        return await interaction.response.send_message("Only the owner can use this.", ephemeral=True)
+    
+    await interaction.response.send_message("Cleaning my messages in this channel...", ephemeral=True)
+    deleted = 0
+    async for msg in interaction.channel.history(limit=500):
+        if msg.author.id == bot.user.id:
+            try:
+                await msg.delete()
+                deleted += 1
+                await asyncio.sleep(0.3)
+            except:
+                pass
+    await interaction.followup.send(f"✅ Deleted **{deleted}** of my messages.", ephemeral=True)
+
+@bot.tree.command(name="clearbotserver", description="Delete all my messages in the entire server (Owner only)")
+async def clearbotserver(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        return await interaction.response.send_message("Only the owner can use this.", ephemeral=True)
+    
+    await interaction.response.send_message("Cleaning my messages across the server... This may take a while.", ephemeral=True)
+    total_deleted = 0
+
+    for channel in interaction.guild.text_channels:
+        try:
+            async for msg in channel.history(limit=300):
+                if msg.author.id == bot.user.id:
+                    try:
+                        await msg.delete()
+                        total_deleted += 1
+                        await asyncio.sleep(0.35)
+                    except:
+                        pass
+        except:
+            continue
+
+    await interaction.followup.send(f"✅ Deleted **{total_deleted}** of my messages in the server.", ephemeral=True)
 
 # ================= MESSAGE HANDLER =================
 
@@ -297,6 +315,7 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
+    # Block racist person
     if RACIST_PERSON and str(message.author.id) == str(RACIST_PERSON):
         try:
             await message.reply("I don’t talk to racist Ik what u did bum🥀", mention_author=False)
@@ -304,6 +323,23 @@ async def on_message(message: discord.Message):
             pass
         return
 
+    # N-word detection → DM owner
+    content_lower = message.content.lower()
+    for pattern in NWORD_PATTERNS:
+        if re.search(pattern, content_lower):
+            try:
+                owner = await bot.fetch_user(OWNER_ID)
+                embed = discord.Embed(
+                    title="⚠️ N-Word Detected",
+                    description=f"**User:** {message.author} (`{message.author.id}`)\n**Channel:** {message.channel.mention if message.guild else 'DM'}\n**Server:** {message.guild.name if message.guild else 'DM'}\n\n**Message:**\n```{message.content[:1000]}```",
+                    color=0xE74C3C
+                )
+                await owner.send(embed=embed)
+            except:
+                pass
+            break
+
+    # Proof system
     if isinstance(message.channel, discord.DMChannel):
         user_id = str(message.author.id)
         if user_id in active_quests and message.attachments:
@@ -327,18 +363,10 @@ async def on_message(message: discord.Message):
                             await check_and_give_roles(member)
 
                 del active_quests[user_id]
-                embed = discord.Embed(
-                    title="✅ Proof Accepted!",
-                    description=f"**+{pts_to_add} points**\nReason: {reason}\n\nTotal: **{user_points[user_id]}**",
-                    color=0x2ECC71
-                )
+                embed = discord.Embed(title="✅ Proof Accepted!", description=f"**+{pts_to_add} points**\nReason: {reason}\n\nTotal: **{user_points[user_id]}**", color=0x2ECC71)
                 await message.channel.send(embed=embed)
             else:
-                embed = discord.Embed(
-                    title="❌ Proof Rejected",
-                    description=f"Reason: {reason}\nTry again.",
-                    color=0xE74C3C
-                )
+                embed = discord.Embed(title="❌ Proof Rejected", description=f"Reason: {reason}\nTry again.", color=0xE74C3C)
                 await message.channel.send(embed=embed)
             return
 
@@ -354,11 +382,7 @@ async def on_message(message: discord.Message):
 
     if re.search(r"\bac\s*quest\b", content) and ac_enabled.get(str(message.guild.id), False):
         try:
-            embed = discord.Embed(
-                title="🎮 AC Quest",
-                description="You ready for your AC Quest?",
-                color=0x9B59B6
-            )
+            embed = discord.Embed(title="🎮 AC Quest", description="You ready for your AC Quest?", color=0x9B59B6)
             view = QuestStartView(message.author.id, str(message.guild.id))
             await message.author.send(embed=embed, view=view)
             await message.reply("Check your DMs!", mention_author=False)
