@@ -315,6 +315,9 @@ async def clearbotserver(interaction: discord.Interaction):
 
     await interaction.followup.send(f"✅ Finished. Deleted **{total_deleted}** of my messages across the server.", ephemeral=True)
 
+
+@bot.tree.command(name="toggle", description="turns it on and off"
+
 # ================= MESSAGE HANDLER =================
 
 @bot.event
