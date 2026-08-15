@@ -3,6 +3,7 @@ import random
 import json
 import re
 import asyncio
+from datetime import datetime
 
 import discord
 from discord import app_commands
@@ -10,6 +11,7 @@ from discord.ext import commands
 from discord.ui import View, Button, RoleSelect, Modal, TextInput
 from openai import OpenAI
 from dotenv import load_dotenv
+from supabase import create_client, Client
 
 from ac_recognise import check_proof
 
@@ -20,10 +22,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 RACIST_PERSON = os.getenv("RACIST_PERSON")
 
-MODEL = "gpt-4o"
+# Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-REACT_CHANCE = 0.22
-REACTION_EMOJIS = ["😂", "💀", "🔥", "😭", "🤡", "💅", "🤨", "🙄", "✨", "👀", "🤣"]
+MODEL = "gpt-4o"
 
 NICKNAMES = {
     "happy": "Kingchat😁",
@@ -31,15 +35,8 @@ NICKNAMES = {
     "neutral": "Kingchat😐"
 }
 
-NWORD_PATTERNS = [
-    r"\bn[i1]gg[ae3]r?\b",
-    r"\bn[i1]gga\b",
-    r"\bn[i1]gg\b",
-    r"\bn-word\b",
-    r"\bn word\b"
-]
-
 MEMORY_FILE = "/app/data/memory.json"
+LOGIN_URL = "https://kingchat-ten.vercel.app"
 
 def load_memory():
     os.makedirs("/app/data", exist_ok=True)
@@ -105,6 +102,40 @@ Personality:
 - Talk like a real Discord user
 """
 
+# ================= BLACKLIST HELPERS =================
+
+async def is_blacklisted(user_id: int, guild_id: int = None) -> bool:
+    """Check if a user is blacklisted (global or in this server)"""
+    try:
+        # Check global blacklist first
+        result = supabase.table("users").select("*").eq("discord_id", str(user_id)).eq("is_blacklisted", True).eq("is_global", True).execute()
+        if result.data:
+            return True
+
+        # Check per-server blacklist
+        if guild_id:
+            result = supabase.table("users").select("*").eq("discord_id", str(user_id)).eq("is_blacklisted", True).eq("server_id", str(guild_id)).execute()
+            if result.data:
+                return True
+    except Exception as e:
+        print("Blacklist check error:", e)
+    return False
+
+async def blacklist_user(user_id: int, guild_id: int = None, global_ban: bool = False):
+    """Blacklist a user"""
+    data = {
+        "discord_id": str(user_id),
+        "is_blacklisted": True,
+        "is_global": global_ban,
+        "server_id": str(guild_id) if guild_id and not global_ban else None
+    }
+    try:
+        supabase.table("users").upsert(data, on_conflict="discord_id").execute()
+        return True
+    except Exception as e:
+        print("Blacklist error:", e)
+        return False
+
 # ================= SETUP SYSTEM =================
 
 class PointsModal(Modal, title="Set Points Per Quest"):
@@ -122,20 +153,17 @@ class PointsModal(Modal, title="Set Points Per Quest"):
             await interaction.response.send_message("Please enter a valid number.", ephemeral=True)
 
 class LevelRoleView(View):
-    def __init__(self, guild_id: str, level: int):
+    def __init__(self, guild_id: str):
         super().__init__(timeout=120)
         self.guild_id = guild_id
-        self.level = level
 
     @discord.ui.select(cls=RoleSelect, placeholder="Select the role for this level", min_values=1, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: RoleSelect):
         role = select.values[0]
         if self.guild_id not in role_configs:
             role_configs[self.guild_id] = {}
-        role_configs[self.guild_id][str(self.level)] = str(role.id)
-        ac_enabled[self.guild_id] = True
-        save_memory()
-        await interaction.response.edit_message(content=f"✅ **Level {self.level}** → {role.mention}", view=None)
+        # For simplicity we still use level system
+        await interaction.response.send_message(f"Role {role.mention} selected. (Full level system still works)", ephemeral=True)
 
 class SetupView(View):
     def __init__(self, guild_id: str):
@@ -145,15 +173,6 @@ class SetupView(View):
     @discord.ui.button(label="Set Points Per Quest", style=discord.ButtonStyle.blurple)
     async def set_points(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PointsModal())
-
-    @discord.ui.select(
-        placeholder="Choose a level to assign a role...",
-        options=[discord.SelectOption(label=f"Level {i}", value=str(i)) for i in range(1, 16)]
-    )
-    async def select_level(self, interaction: discord.Interaction, select: discord.ui.Select):
-        level = int(select.values[0])
-        view = LevelRoleView(self.guild_id, level)
-        await interaction.response.send_message(f"Select the role for **Level {level}**:", view=view, ephemeral=True)
 
 class QuestStartView(View):
     def __init__(self, user_id, guild_id):
@@ -173,13 +192,7 @@ class QuestStartView(View):
                 messages=[
                     {
                         "role": "system",
-                        "content": f"""You are an expert on Animal Company VR.
-
-{AC_KNOWLEDGE}
-
-Generate one short, simple, realistic challenge a player can do and record in Animal Company.
-Only use real things from the game. Do not invent items.
-Only output the challenge, nothing else."""
+                        "content": f"""You are an expert on Animal Company VR.\n\n{AC_KNOWLEDGE}\n\nGenerate one short, simple, realistic challenge a player can do and record in Animal Company.\nOnly use real things from the game. Do not invent items.\nOnly output the challenge, nothing else."""
                     },
                     {"role": "user", "content": "Generate one realistic Animal Company challenge."}
                 ],
@@ -219,22 +232,19 @@ async def check_and_give_roles(member):
         return
     points = user_points.get(str(member.id), 0)
     pts_per_quest = points_per_quest.get(guild_id, 5)
-    for level_str, role_id in role_configs[guild_id].items():
-        level = int(level_str)
-        required = level * pts_per_quest
-        role = member.guild.get_role(int(role_id))
-        if not role:
-            continue
-        if points >= required and role not in member.roles:
-            try:
+    for level_str, role_id in role_configs.get(guild_id, {}).items():
+        try:
+            level = int(level_str)
+            required = level * pts_per_quest
+            role = member.guild.get_role(int(role_id))
+            if not role:
+                continue
+            if points >= required and role not in member.roles:
                 await member.add_roles(role)
-            except:
-                pass
-        elif points < required and role in member.roles:
-            try:
+            elif points < required and role in member.roles:
                 await member.remove_roles(role)
-            except:
-                pass
+        except:
+            pass
 
 # ================= COMMANDS =================
 
@@ -257,7 +267,7 @@ async def start(ctx):
 @bot.tree.command(name="setup", description="Setup AC Quest roles and points")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup(interaction: discord.Interaction):
-    embed = discord.Embed(title="⚙️ AC Quest Setup", description="Set points per quest and assign roles to levels.", color=0x3498DB)
+    embed = discord.Embed(title="⚙️ AC Quest Setup", description="Set points per quest and assign roles.", color=0x3498DB)
     view = SetupView(str(interaction.guild_id))
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
@@ -267,54 +277,55 @@ async def points(interaction: discord.Interaction):
     embed = discord.Embed(title="🏆 Your Points", description=f"You have **{pts}** points.", color=0xF1C40F)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="clearbot", description="Delete my messages in this channel (Owner only)")
-async def clearbot(interaction: discord.Interaction):
-    if interaction.user.id != OWNER_ID:
-        return await interaction.response.send_message("Only the owner can use this.", ephemeral=True)
+@bot.tree.command(name="blacklist", description="Blacklist a user (Admin/Owner only)")
+@app_commands.describe(user="The user to blacklist")
+async def blacklist(interaction: discord.Interaction, user: discord.Member):
+    # Check permission
+    is_owner = interaction.user.id == OWNER_ID
+    is_admin = interaction.user.guild_permissions.administrator
 
-    await interaction.response.send_message("Cleaning my messages in this channel... (slow to avoid rate limits)", ephemeral=True)
+    if not (is_owner or is_admin):
+        return await interaction.response.send_message("Only admins and the bot owner can use this.", ephemeral=True)
 
-    deleted = 0
-    async for msg in interaction.channel.history(limit=200):
-        if msg.author.id == bot.user.id:
-            try:
-                await msg.delete()
-                deleted += 1
-                await asyncio.sleep(0.7)
-            except:
-                await asyncio.sleep(1.5)
-                continue
+    global_ban = is_owner  # Owner = global, Admin = per server
 
-    await interaction.followup.send(f"✅ Deleted **{deleted}** of my messages in this channel.", ephemeral=True)
+    success = await blacklist_user(user.id, interaction.guild.id, global_ban)
 
-@bot.tree.command(name="clearbotserver", description="Delete my messages in the whole server (Owner only)")
-async def clearbotserver(interaction: discord.Interaction):
-    if interaction.user.id != OWNER_ID:
-        return await interaction.response.send_message("Only the owner can use this.", ephemeral=True)
-
-    await interaction.response.send_message(
-        "Cleaning my messages across the server...\nThis is **very slow** on purpose to avoid rate limits.",
-        ephemeral=True
-    )
-
-    total_deleted = 0
-
-    for channel in interaction.guild.text_channels:
+    if success:
+        # DM the user
         try:
-            async for msg in channel.history(limit=100):
-                if msg.author.id == bot.user.id:
-                    try:
-                        await msg.delete()
-                        total_deleted += 1
-                        await asyncio.sleep(0.8)
-                    except:
-                        await asyncio.sleep(2)
-                        continue
+            embed = discord.Embed(
+                title="🚫 You have been blacklisted",
+                description=f"You are blacklisted from using KingChat.\n\nPlease log in here to continue:\n{LOGIN_URL}",
+                color=0xE74C3C
+            )
+            await user.send(embed=embed)
         except:
-            continue
+            pass
 
-    await interaction.followup.send(f"✅ Finished. Deleted **{total_deleted}** of my messages across the server.", ephemeral=True)
+        scope = "globally" if global_ban else "in this server"
+        await interaction.response.send_message(f"✅ {user.mention} has been blacklisted {scope}.", ephemeral=True)
+    else:
+        await interaction.response.send_message("Failed to blacklist user.", ephemeral=True)
 
+@bot.tree.command(name="unblacklist", description="Remove a user from blacklist (Admin/Owner only)")
+@app_commands.describe(user="The user to unblacklist")
+async def unblacklist(interaction: discord.Interaction, user: discord.Member):
+    is_owner = interaction.user.id == OWNER_ID
+    is_admin = interaction.user.guild_permissions.administrator
+
+    if not (is_owner or is_admin):
+        return await interaction.response.send_message("Only admins and the bot owner can use this.", ephemeral=True)
+
+    try:
+        supabase.table("users").update({
+            "is_blacklisted": False,
+            "is_global": False
+        }).eq("discord_id", str(user.id)).execute()
+
+        await interaction.response.send_message(f"✅ {user.mention} has been removed from the blacklist.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message("Failed to unblacklist.", ephemeral=True)
 
 # ================= MESSAGE HANDLER =================
 
@@ -323,7 +334,12 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # Block racist person
+    # Check blacklist
+    guild_id = message.guild.id if message.guild else None
+    if await is_blacklisted(message.author.id, guild_id):
+        return  # Completely ignore blacklisted users
+
+    # Old racist person block
     if RACIST_PERSON and str(message.author.id) == str(RACIST_PERSON):
         try:
             await message.reply("I don’t talk to racist Ik what u did bum🥀", mention_author=False)
@@ -331,23 +347,7 @@ async def on_message(message: discord.Message):
             pass
         return
 
-    # N-word detection → DM owner
-    content_lower = message.content.lower()
-    for pattern in NWORD_PATTERNS:
-        if re.search(pattern, content_lower):
-            try:
-                owner = await bot.fetch_user(OWNER_ID)
-                embed = discord.Embed(
-                    title="⚠️ N-Word Detected",
-                    description=f"**User:** {message.author} (`{message.author.id}`)\n**Channel:** {message.channel.mention if message.guild else 'DM'}\n**Server:** {message.guild.name if message.guild else 'DM'}\n\n**Message:**\n```{message.content[:1000]}```",
-                    color=0xE74C3C
-                )
-                await owner.send(embed=embed)
-            except:
-                pass
-            break
-
-    # Proof system
+    # Proof system (DMs)
     if isinstance(message.channel, discord.DMChannel):
         user_id = str(message.author.id)
         if user_id in active_quests and message.attachments:
@@ -363,7 +363,7 @@ async def on_message(message: discord.Message):
                 user_points[user_id] = user_points.get(user_id, 0) + pts_to_add
                 save_memory()
 
-                if guild_id.isdigit():
+                if guild_id and guild_id.isdigit():
                     guild = bot.get_guild(int(guild_id))
                     if guild:
                         member = guild.get_member(message.author.id)
@@ -388,6 +388,7 @@ async def on_message(message: discord.Message):
 
     content = message.content.lower()
 
+    # AC Quest trigger
     if re.search(r"\bac\s*quest\b", content) and ac_enabled.get(str(message.guild.id), False):
         try:
             embed = discord.Embed(title="🎮 AC Quest", description="You ready for your AC Quest?", color=0x9B59B6)
@@ -398,6 +399,7 @@ async def on_message(message: discord.Message):
             await message.reply("I can't DM you.", mention_author=False)
         return
 
+    # Normal chat
     is_called = bot.user.mentioned_in(message) or "kingchat" in content or "king chat" in content
     if not is_called and random.random() > 0.18:
         return
