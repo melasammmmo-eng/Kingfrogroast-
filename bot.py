@@ -269,13 +269,13 @@ async def on_ready():
 
 # ================= COMMANDS =================
 
-@bot.command(name="stop")
-async def stop(ctx):
+@bot.command(name="stfu")
+async def stfu(ctx):
     if ctx.author.id != OWNER_ID:
         return
     toggles[str(ctx.guild.id)] = False
     save_memory()
-    await ctx.send("🛑 Bot stopped.")
+    await ctx.send("🛑 sry .")
 
 @bot.command(name="start")
 async def start(ctx):
