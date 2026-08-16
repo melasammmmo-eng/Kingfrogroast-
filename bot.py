@@ -102,7 +102,7 @@ Personality:
 - Talk like a real Discord user
 """
 
-# ================= LOCK + BLACKLIST SYSTEM =================
+# ================= LOCK + BLACKLIST =================
 
 def is_server_unlocked(guild_id: int) -> bool:
     return unlocked_servers.get(str(guild_id), False)
@@ -149,7 +149,7 @@ async def check_all_servers():
     for guild in bot.guilds:
         await try_unlock_server(guild)
 
-# ================= SETUP SYSTEM =================
+# ================= SETUP =================
 
 class PointsModal(Modal, title="Set Points Per Quest"):
     points_input = TextInput(label="How many points per quest?", placeholder="5", required=True)
@@ -191,13 +191,13 @@ class SetupView(View):
         await interaction.response.send_modal(PointsModal())
 
     @discord.ui.select(
-        placeholder="Choose a level to assign a role...",
+        placeholder="Choose a level...",
         options=[discord.SelectOption(label=f"Level {i}", value=str(i)) for i in range(1, 16)]
     )
     async def select_level(self, interaction: discord.Interaction, select: discord.ui.Select):
         level = int(select.values[0])
         view = LevelRoleView(self.guild_id, level)
-        await interaction.response.send_message(f"Select the role for **Level {level}**:", view=view, ephemeral=True)
+        await interaction.response.send_message(f"Select role for **Level {level}**:", view=view, ephemeral=True)
 
 class QuestStartView(View):
     def __init__(self, user_id, guild_id):
@@ -248,10 +248,10 @@ async def on_guild_join(guild: discord.Guild):
                 title="🔒 KingChat is Locked",
                 description=(
                     f"Thanks for adding **KingChat**!\n\n"
-                    f"The bot is currently **locked** in your server.\n\n"
-                    f"To unlock it, please log in with your Discord account here:\n"
+                    f"The bot is currently **locked**.\n\n"
+                    f"To unlock it, log in with your Discord account here:\n"
                     f"**{LOGIN_URL}**\n\n"
-                    f"After you log in, the bot will automatically unlock within 30 seconds and notify you."
+                    f"It will automatically unlock within 30 seconds after you log in."
                 ),
                 color=0xE67E22
             )
@@ -285,21 +285,20 @@ async def start(ctx):
     save_memory()
     await ctx.send("🟢 Bot started.")
 
-@bot.tree.command(name="setup", description="Setup AC Quest roles and points")
+@bot.tree.command(name="setup", description="Setup AC Quest")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup(interaction: discord.Interaction):
     if not is_server_unlocked(interaction.guild.id):
-        return await interaction.response.send_message("Server is locked. Owner must log in first.", ephemeral=True)
-    embed = discord.Embed(title="⚙️ AC Quest Setup", description="Set points and assign roles to levels.", color=0x3498DB)
+        return await interaction.response.send_message("Server is locked.", ephemeral=True)
     view = SetupView(str(interaction.guild_id))
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    await interaction.response.send_message(embed=discord.Embed(title="⚙️ Setup", color=0x3498DB), view=view, ephemeral=True)
 
 @bot.tree.command(name="points", description="Check your points")
 async def points(interaction: discord.Interaction):
     pts = user_points.get(str(interaction.user.id), 0)
     await interaction.response.send_message(f"You have **{pts}** points.", ephemeral=True)
 
-@bot.tree.command(name="serverblacklist", description="Blacklist a user in this server only")
+@bot.tree.command(name="serverblacklist", description="Blacklist a user in this server")
 @app_commands.describe(user="User to blacklist")
 async def serverblacklist(interaction: discord.Interaction, user: discord.Member):
     if not is_server_unlocked(interaction.guild.id):
@@ -334,14 +333,14 @@ async def globalblacklist(interaction: discord.Interaction, user: discord.Member
             "server_id": None
         }).execute()
         try:
-            await user.send(f"You have been **globally blacklisted** from KingChat.\n{LOGIN_URL}")
+            await user.send(f"You have been **globally blacklisted**.\n{LOGIN_URL}")
         except:
             pass
         await interaction.response.send_message(f"✅ {user.mention} globally blacklisted.", ephemeral=True)
     except:
         await interaction.response.send_message("Failed.", ephemeral=True)
 
-@bot.tree.command(name="unblacklist", description="Remove a user from blacklist")
+@bot.tree.command(name="unblacklist", description="Remove blacklist")
 @app_commands.describe(user="User to unblacklist")
 async def unblacklist(interaction: discord.Interaction, user: discord.Member):
     if not (interaction.user.guild_permissions.administrator or interaction.user.id == OWNER_ID):
@@ -356,19 +355,21 @@ async def unblacklist(interaction: discord.Interaction, user: discord.Member):
     except:
         await interaction.response.send_message("Failed.", ephemeral=True)
 
-# ================= MESSAGE HANDLER =================
+# ================= MESSAGE HANDLER (SUPER HARD LOCK) =================
 
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # HARD LOCK
-    if message.guild and not is_server_unlocked(message.guild.id):
-        if message.author.id not in [OWNER_ID, message.guild.owner_id]:
-            return
+    # ========== SUPER HARD LOCK ==========
+    if message.guild:
+        if not is_server_unlocked(message.guild.id):
+            if message.author.id != OWNER_ID:
+                return
+    # ====================================
 
-    # Blacklist check
+    # Blacklist
     guild_id = message.guild.id if message.guild else None
     if await is_blacklisted(message.author.id, guild_id):
         return
@@ -402,17 +403,15 @@ async def on_message(message: discord.Message):
 
     content = message.content.lower()
 
-    # AC Quest
     if re.search(r"\bac\s*quest\b", content) and ac_enabled.get(str(message.guild.id), False):
         try:
             view = QuestStartView(message.author.id, str(message.guild.id))
-            await message.author.send(embed=discord.Embed(title="🎮 AC Quest", description="Ready for your quest?", color=0x9B59B6), view=view)
+            await message.author.send(embed=discord.Embed(title="🎮 AC Quest", description="Ready?", color=0x9B59B6), view=view)
             await message.reply("Check your DMs!", mention_author=False)
         except:
             await message.reply("I can't DM you.", mention_author=False)
         return
 
-    # Normal chat
     is_called = bot.user.mentioned_in(message) or "kingchat" in content or "king chat" in content
     if not is_called and random.random() > 0.18:
         return
