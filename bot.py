@@ -7,7 +7,7 @@ import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from discord.ui import View, Button, Modal, TextInput
+from discord.ui import View, Button, Modal, TextInput, RoleSelect
 from openai import OpenAI
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -19,7 +19,6 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID"))
-RACIST_PERSON = os.getenv("RACIST_PERSON")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -103,60 +102,54 @@ Personality:
 - Talk like a real Discord user
 """
 
-# ================= HELPERS =================
+# ================= LOCK + BLACKLIST SYSTEM =================
 
-async def is_server_unlocked(guild_id: int) -> bool:
+def is_server_unlocked(guild_id: int) -> bool:
     return unlocked_servers.get(str(guild_id), False)
 
-async def has_owner_logged_in(owner_id: int) -> bool:
+async def has_logged_in(discord_id: int) -> bool:
     try:
-        result = supabase.table("users").select("discord_id").eq("discord_id", str(owner_id)).execute()
+        result = supabase.table("users").select("discord_id").eq("discord_id", str(discord_id)).execute()
         return bool(result.data)
     except:
         return False
 
 async def is_blacklisted(user_id: int, guild_id: int = None) -> bool:
     try:
-        # Global blacklist
         res = supabase.table("users").select("*").eq("discord_id", str(user_id)).eq("is_blacklisted", True).eq("is_global", True).execute()
         if res.data:
             return True
-        # Per-server blacklist
         if guild_id:
             res = supabase.table("users").select("*").eq("discord_id", str(user_id)).eq("is_blacklisted", True).eq("server_id", str(guild_id)).execute()
             if res.data:
                 return True
-    except Exception as e:
-        print("Blacklist check error:", e)
+    except:
+        pass
     return False
 
-async def check_and_unlock_server(guild: discord.Guild):
-    if await is_server_unlocked(guild.id):
+async def try_unlock_server(guild: discord.Guild):
+    if is_server_unlocked(guild.id):
         return
-
-    if await has_owner_logged_in(guild.owner_id):
+    if await has_logged_in(guild.owner_id):
         unlocked_servers[str(guild.id)] = True
         save_memory()
         try:
-            owner = guild.owner
-            if owner:
-                embed = discord.Embed(
-                    title="✅ KingChat Unlocked!",
-                    description="The bot is now fully unlocked in your server.\nYou can now use `/serverblacklist`.",
-                    color=0x2ECC71
-                )
-                await owner.send(embed=embed)
+            owner = guild.owner or await bot.fetch_user(guild.owner_id)
+            embed = discord.Embed(
+                title="✅ KingChat Unlocked!",
+                description="Your server is now unlocked.\nYou can use `/serverblacklist`.",
+                color=0x2ECC71
+            )
+            await owner.send(embed=embed)
         except:
             pass
 
-# ================= BACKGROUND TASK =================
-
-@tasks.loop(seconds=45)
-async def check_locked_servers():
+@tasks.loop(seconds=30)
+async def check_all_servers():
     for guild in bot.guilds:
-        await check_and_unlock_server(guild)
+        await try_unlock_server(guild)
 
-# ================= VIEWS =================
+# ================= SETUP SYSTEM =================
 
 class PointsModal(Modal, title="Set Points Per Quest"):
     points_input = TextInput(label="How many points per quest?", placeholder="5", required=True)
@@ -172,6 +165,22 @@ class PointsModal(Modal, title="Set Points Per Quest"):
         except:
             await interaction.response.send_message("Invalid number.", ephemeral=True)
 
+class LevelRoleView(View):
+    def __init__(self, guild_id: str, level: int):
+        super().__init__(timeout=120)
+        self.guild_id = guild_id
+        self.level = level
+
+    @discord.ui.select(cls=RoleSelect, placeholder="Select role for this level", min_values=1, max_values=1)
+    async def select_role(self, interaction: discord.Interaction, select: RoleSelect):
+        role = select.values[0]
+        if self.guild_id not in role_configs:
+            role_configs[self.guild_id] = {}
+        role_configs[self.guild_id][str(self.level)] = str(role.id)
+        ac_enabled[self.guild_id] = True
+        save_memory()
+        await interaction.response.edit_message(content=f"✅ Level {self.level} → {role.mention}", view=None)
+
 class SetupView(View):
     def __init__(self, guild_id: str):
         super().__init__(timeout=180)
@@ -180,6 +189,15 @@ class SetupView(View):
     @discord.ui.button(label="Set Points Per Quest", style=discord.ButtonStyle.blurple)
     async def set_points(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_modal(PointsModal())
+
+    @discord.ui.select(
+        placeholder="Choose a level to assign a role...",
+        options=[discord.SelectOption(label=f"Level {i}", value=str(i)) for i in range(1, 16)]
+    )
+    async def select_level(self, interaction: discord.Interaction, select: discord.ui.Select):
+        level = int(select.values[0])
+        view = LevelRoleView(self.guild_id, level)
+        await interaction.response.send_message(f"Select the role for **Level {level}**:", view=view, ephemeral=True)
 
 class QuestStartView(View):
     def __init__(self, user_id, guild_id):
@@ -200,7 +218,7 @@ class QuestStartView(View):
                     {"role": "system", "content": f"You are an expert on Animal Company.\n\n{AC_KNOWLEDGE}\n\nGenerate one short realistic challenge. Only output the challenge."},
                     {"role": "user", "content": "Generate one realistic Animal Company challenge."}
                 ],
-                max_tokens=40,
+                max_tokens=45,
                 temperature=0.8
             )
             task = res.choices[0].message.content.strip()
@@ -223,17 +241,17 @@ class QuestStartView(View):
 async def on_guild_join(guild: discord.Guild):
     unlocked_servers[str(guild.id)] = False
     save_memory()
-
     try:
         owner = guild.owner
         if owner:
             embed = discord.Embed(
                 title="🔒 KingChat is Locked",
                 description=(
-                    f"Thanks for adding me!\n\n"
-                    f"To **unlock** the bot, please log in here:\n"
+                    f"Thanks for adding **KingChat**!\n\n"
+                    f"The bot is currently **locked** in your server.\n\n"
+                    f"To unlock it, please log in with your Discord account here:\n"
                     f"**{LOGIN_URL}**\n\n"
-                    f"After you log in, I will automatically unlock and notify you."
+                    f"After you log in, the bot will automatically unlock within 30 seconds and notify you."
                 ),
                 color=0xE67E22
             )
@@ -245,7 +263,9 @@ async def on_guild_join(guild: discord.Guild):
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     await bot.tree.sync()
-    check_locked_servers.start()
+    check_all_servers.start()
+    for guild in bot.guilds:
+        await try_unlock_server(guild)
 
 # ================= COMMANDS =================
 
@@ -265,13 +285,14 @@ async def start(ctx):
     save_memory()
     await ctx.send("🟢 Bot started.")
 
-@bot.tree.command(name="setup", description="Setup AC Quest")
+@bot.tree.command(name="setup", description="Setup AC Quest roles and points")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup(interaction: discord.Interaction):
-    if not await is_server_unlocked(interaction.guild.id):
+    if not is_server_unlocked(interaction.guild.id):
         return await interaction.response.send_message("Server is locked. Owner must log in first.", ephemeral=True)
-    view = SetupView(str(interaction.guild.id))
-    await interaction.response.send_message("Setup:", view=view, ephemeral=True)
+    embed = discord.Embed(title="⚙️ AC Quest Setup", description="Set points and assign roles to levels.", color=0x3498DB)
+    view = SetupView(str(interaction.guild_id))
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 @bot.tree.command(name="points", description="Check your points")
 async def points(interaction: discord.Interaction):
@@ -281,12 +302,10 @@ async def points(interaction: discord.Interaction):
 @bot.tree.command(name="serverblacklist", description="Blacklist a user in this server only")
 @app_commands.describe(user="User to blacklist")
 async def serverblacklist(interaction: discord.Interaction, user: discord.Member):
-    if not await is_server_unlocked(interaction.guild.id):
-        return await interaction.response.send_message("Server is still locked.", ephemeral=True)
-
+    if not is_server_unlocked(interaction.guild.id):
+        return await interaction.response.send_message("Server is locked.", ephemeral=True)
     if not (interaction.user.guild_permissions.administrator or interaction.user.id == OWNER_ID):
         return await interaction.response.send_message("Only admins can use this.", ephemeral=True)
-
     try:
         supabase.table("users").upsert({
             "discord_id": str(user.id),
@@ -294,12 +313,10 @@ async def serverblacklist(interaction: discord.Interaction, user: discord.Member
             "is_global": False,
             "server_id": str(interaction.guild.id)
         }).execute()
-
         try:
-            await user.send(f"You have been blacklisted in **{interaction.guild.name}**.\nLog in: {LOGIN_URL}")
+            await user.send(f"You have been blacklisted in **{interaction.guild.name}**.\n{LOGIN_URL}")
         except:
             pass
-
         await interaction.response.send_message(f"✅ {user.mention} blacklisted in this server.", ephemeral=True)
     except:
         await interaction.response.send_message("Failed.", ephemeral=True)
@@ -309,7 +326,6 @@ async def serverblacklist(interaction: discord.Interaction, user: discord.Member
 async def globalblacklist(interaction: discord.Interaction, user: discord.Member):
     if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message("Only the bot owner can use this.", ephemeral=True)
-
     try:
         supabase.table("users").upsert({
             "discord_id": str(user.id),
@@ -317,22 +333,19 @@ async def globalblacklist(interaction: discord.Interaction, user: discord.Member
             "is_global": True,
             "server_id": None
         }).execute()
-
         try:
-            await user.send(f"You have been **globally blacklisted** from KingChat.\nLog in: {LOGIN_URL}")
+            await user.send(f"You have been **globally blacklisted** from KingChat.\n{LOGIN_URL}")
         except:
             pass
-
-        await interaction.response.send_message(f"✅ {user.mention} has been globally blacklisted.", ephemeral=True)
+        await interaction.response.send_message(f"✅ {user.mention} globally blacklisted.", ephemeral=True)
     except:
         await interaction.response.send_message("Failed.", ephemeral=True)
 
-@bot.tree.command(name="unblacklist", description="Remove blacklist")
+@bot.tree.command(name="unblacklist", description="Remove a user from blacklist")
 @app_commands.describe(user="User to unblacklist")
 async def unblacklist(interaction: discord.Interaction, user: discord.Member):
     if not (interaction.user.guild_permissions.administrator or interaction.user.id == OWNER_ID):
         return await interaction.response.send_message("No permission.", ephemeral=True)
-
     try:
         supabase.table("users").update({
             "is_blacklisted": False,
@@ -350,22 +363,14 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # Server lock check
-    if message.guild and not await is_server_unlocked(message.guild.id):
-        if message.author.id not in [message.guild.owner_id, OWNER_ID]:
+    # HARD LOCK
+    if message.guild and not is_server_unlocked(message.guild.id):
+        if message.author.id not in [OWNER_ID, message.guild.owner_id]:
             return
 
     # Blacklist check
     guild_id = message.guild.id if message.guild else None
     if await is_blacklisted(message.author.id, guild_id):
-        return
-
-    # Racist person block
-    if RACIST_PERSON and str(message.author.id) == str(RACIST_PERSON):
-        try:
-            await message.reply("I don’t talk to racist Ik what u did bum🥀", mention_author=False)
-        except:
-            pass
         return
 
     # Proof system
@@ -375,10 +380,8 @@ async def on_message(message: discord.Message):
             att = message.attachments[0]
             quest = active_quests[user_id]["task"]
             g_id = active_quests[user_id]["guild_id"]
-
             await message.channel.send("Checking your proof...")
             is_valid, reason = await check_proof(att.url, quest, att.filename)
-
             if is_valid:
                 pts = points_per_quest.get(g_id, 5)
                 user_points[user_id] = user_points.get(user_id, 0) + pts
@@ -399,6 +402,7 @@ async def on_message(message: discord.Message):
 
     content = message.content.lower()
 
+    # AC Quest
     if re.search(r"\bac\s*quest\b", content) and ac_enabled.get(str(message.guild.id), False):
         try:
             view = QuestStartView(message.author.id, str(message.guild.id))
@@ -408,6 +412,7 @@ async def on_message(message: discord.Message):
             await message.reply("I can't DM you.", mention_author=False)
         return
 
+    # Normal chat
     is_called = bot.user.mentioned_in(message) or "kingchat" in content or "king chat" in content
     if not is_called and random.random() > 0.18:
         return
