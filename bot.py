@@ -364,7 +364,7 @@ async def help_command(interaction: discord.Interaction):
         name="Owner Only",
         value=(
             "`/globalblacklist` - Blacklist a user everywhere\n"
-            "`!stop` / `!start` - Stop or start the bot"
+            "`!stop` / `!start` - Stop or start the bot (Owner only)"
         ),
         inline=False
     )
