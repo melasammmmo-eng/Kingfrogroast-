@@ -475,19 +475,18 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # ========== HARD LOCK ==========
+    # ========== SUPER HARD LOCK ==========
+    # If the server is locked → completely ignore everything
     if message.guild and not is_server_unlocked(message.guild.id):
-        # Completely ignore everyone until the server is unlocked
-        if message.author.id != OWNER_ID:
-            return
-    # ===============================
+        return
+    # =====================================
 
     # BLACKLIST CHECK
     guild_id = message.guild.id if message.guild else None
     if await is_blacklisted(message.author.id, guild_id):
         return
 
-    # Proof system
+    # Proof system (DMs still work)
     if isinstance(message.channel, discord.DMChannel):
         user_id = str(message.author.id)
         if user_id in active_quests and message.attachments:
