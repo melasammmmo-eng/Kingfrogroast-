@@ -19,6 +19,7 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID"))
+CLIENT_ID = os.getenv("CLIENT_ID")  # Add this to your .env
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -116,11 +117,9 @@ async def has_logged_in(discord_id: int) -> bool:
 
 async def is_blacklisted(user_id: int, guild_id: int = None) -> bool:
     try:
-        # Global blacklist
         res = supabase.table("users").select("*").eq("discord_id", str(user_id)).eq("is_blacklisted", True).eq("is_global", True).execute()
         if res.data:
             return True
-        # Server blacklist
         if guild_id:
             res = supabase.table("users").select("*").eq("discord_id", str(user_id)).eq("is_blacklisted", True).eq("server_id", str(guild_id)).execute()
             if res.data:
@@ -299,6 +298,73 @@ async def setup(interaction: discord.Interaction):
 async def points(interaction: discord.Interaction):
     pts = user_points.get(str(interaction.user.id), 0)
     await interaction.response.send_message(f"You have **{pts}** points.", ephemeral=True)
+
+@bot.tree.command(name="invite", description="Get the invite link for KingChat")
+async def invite(interaction: discord.Interaction):
+    invite_url = f"https://discord.com/oauth2/authorize?client_id={CLIENT_ID}&permissions=8&scope=bot%20applications.commands"
+    
+    embed = discord.Embed(
+        title="Invite KingChat",
+        description="Click the button below to add **KingChat** to your server!",
+        color=0x00FF85
+    )
+    embed.set_footer(text="Thanks for supporting KingChat!")
+    
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(label="Invite KingChat", url=invite_url, style=discord.ButtonStyle.link))
+    
+    await interaction.response.send_message(embed=embed, view=view)
+
+@bot.tree.command(name="help", description="Show all KingChat commands")
+async def help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="KingChat Help",
+        description="Here are all the available commands:",
+        color=0x1E90FF
+    )
+    
+    embed.add_field(
+        name="General",
+        value=(
+            "`/help` - Show this help message\n"
+            "`/invite` - Get the bot invite link\n"
+            "`/points` - Check your AC Quest points"
+        ),
+        inline=False
+    )
+    
+    embed.add_field(
+        name="Admin Commands",
+        value=(
+            "`/setup` - Setup AC Quest roles & points\n"
+            "`/serverblacklist` - Blacklist a user in this server\n"
+            "`/unblacklist` - Remove a user from blacklist"
+        ),
+        inline=False
+    )
+    
+    embed.add_field(
+        name="Owner Only",
+        value=(
+            "`/globalblacklist` - Blacklist a user everywhere\n"
+            "`!stop` / `!start` - Stop or start the bot in a server"
+        ),
+        inline=False
+    )
+    
+    embed.add_field(
+        name="Features",
+        value=(
+            "• Say **ac quest** to get a challenge\n"
+            "• Mention **KingChat** or say the name to talk to it\n"
+            "• Server locks until the owner logs in"
+        ),
+        inline=False
+    )
+    
+    embed.set_footer(text="KingChat • Made by KingFrog")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="serverblacklist", description="Blacklist a user in this server only")
 @app_commands.describe(user="User to blacklist")
