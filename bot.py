@@ -313,7 +313,8 @@ async def serverblacklist(interaction: discord.Interaction, user: discord.Member
             "discord_id": str(user.id),
             "is_blacklisted": True,
             "is_global": False,
-            "server_id": str(interaction.guild.id)
+            "server_id": str(interaction.guild.id),
+            "username": str(user)
         }).execute()
 
         try:
@@ -326,7 +327,7 @@ async def serverblacklist(interaction: discord.Interaction, user: discord.Member
         except:
             pass
 
-        await interaction.response.send_message(f"✅ {user.mention} blacklisted in this server.", ephemeral=True)
+        await interaction.response.send_message(f"✅ **{user}** has been blacklisted in this server.", ephemeral=True)
     except:
         await interaction.response.send_message("Failed.", ephemeral=True)
 
@@ -339,24 +340,33 @@ async def globalblacklist(interaction: discord.Interaction, user: discord.Member
     try:
         supabase.table("users").upsert({
             "discord_id": str(user.id),
+            "google_email": None,
             "is_blacklisted": True,
             "is_global": True,
-            "server_id": None
+            "server_id": None,
+            "username": str(user)
         }).execute()
 
         try:
             embed = discord.Embed(
                 title="🚫 You have been globally blacklisted",
-                description=f"You have been blacklisted from KingChat everywhere.\n\nLog in here:\n**{LOGIN_URL}**",
+                description=(
+                    f"**{user}** has been blacklisted from KingChat everywhere.\n\n"
+                    f"Log in here if you want to appeal:\n**{LOGIN_URL}**"
+                ),
                 color=0xE74C3C
             )
             await user.send(embed=embed)
         except:
             pass
 
-        await interaction.response.send_message(f"✅ {user.mention} has been globally blacklisted.", ephemeral=True)
-    except:
-        await interaction.response.send_message("Failed.", ephemeral=True)
+        await interaction.response.send_message(
+            f"✅ **{user}** (`{user.id}`) has been globally blacklisted.",
+            ephemeral=True
+        )
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message("Failed to blacklist user.", ephemeral=True)
 
 @bot.tree.command(name="unblacklist", description="Remove blacklist")
 @app_commands.describe(user="User to unblacklist")
@@ -370,7 +380,7 @@ async def unblacklist(interaction: discord.Interaction, user: discord.Member):
             "is_global": False,
             "server_id": None
         }).eq("discord_id", str(user.id)).execute()
-        await interaction.response.send_message(f"✅ {user.mention} unblacklisted.", ephemeral=True)
+        await interaction.response.send_message(f"✅ **{user}** has been unblacklisted.", ephemeral=True)
     except:
         await interaction.response.send_message("Failed.", ephemeral=True)
 
