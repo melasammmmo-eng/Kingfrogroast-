@@ -97,7 +97,7 @@ You have deep knowledge of Animal Company:
 
 Personality:
 - Be nice when people are nice
-- Be mean when people are rude like career ending
+- Be mean (but not too far) when people are rude
 - Keep replies short (1-2 sentences)
 - Talk like a real Discord user
 """
@@ -116,15 +116,17 @@ async def has_logged_in(discord_id: int) -> bool:
 
 async def is_blacklisted(user_id: int, guild_id: int = None) -> bool:
     try:
+        # Global blacklist
         res = supabase.table("users").select("*").eq("discord_id", str(user_id)).eq("is_blacklisted", True).eq("is_global", True).execute()
         if res.data:
             return True
+        # Server blacklist
         if guild_id:
             res = supabase.table("users").select("*").eq("discord_id", str(user_id)).eq("is_blacklisted", True).eq("server_id", str(guild_id)).execute()
             if res.data:
                 return True
-    except:
-        pass
+    except Exception as e:
+        print("Blacklist check error:", e)
     return False
 
 async def try_unlock_server(guild: discord.Guild):
@@ -269,13 +271,13 @@ async def on_ready():
 
 # ================= COMMANDS =================
 
-@bot.command(name="stfu")
-async def stfu(ctx):
+@bot.command(name="stop")
+async def stop(ctx):
     if ctx.author.id != OWNER_ID:
         return
     toggles[str(ctx.guild.id)] = False
     save_memory()
-    await ctx.send("🛑 sry .")
+    await ctx.send("🛑 Bot stopped.")
 
 @bot.command(name="start")
 async def start(ctx):
@@ -298,13 +300,14 @@ async def points(interaction: discord.Interaction):
     pts = user_points.get(str(interaction.user.id), 0)
     await interaction.response.send_message(f"You have **{pts}** points.", ephemeral=True)
 
-@bot.tree.command(name="serverblacklist", description="Blacklist a user in this server")
+@bot.tree.command(name="serverblacklist", description="Blacklist a user in this server only")
 @app_commands.describe(user="User to blacklist")
 async def serverblacklist(interaction: discord.Interaction, user: discord.Member):
     if not is_server_unlocked(interaction.guild.id):
         return await interaction.response.send_message("Server is locked.", ephemeral=True)
     if not (interaction.user.guild_permissions.administrator or interaction.user.id == OWNER_ID):
         return await interaction.response.send_message("Only admins can use this.", ephemeral=True)
+
     try:
         supabase.table("users").upsert({
             "discord_id": str(user.id),
@@ -312,10 +315,17 @@ async def serverblacklist(interaction: discord.Interaction, user: discord.Member
             "is_global": False,
             "server_id": str(interaction.guild.id)
         }).execute()
+
         try:
-            await user.send(f"You have been blacklisted in **{interaction.guild.name}**.\n{LOGIN_URL}")
+            embed = discord.Embed(
+                title="🚫 You have been blacklisted",
+                description=f"You have been blacklisted in **{interaction.guild.name}**.\n\nLog in here:\n**{LOGIN_URL}**",
+                color=0xE74C3C
+            )
+            await user.send(embed=embed)
         except:
             pass
+
         await interaction.response.send_message(f"✅ {user.mention} blacklisted in this server.", ephemeral=True)
     except:
         await interaction.response.send_message("Failed.", ephemeral=True)
@@ -325,6 +335,7 @@ async def serverblacklist(interaction: discord.Interaction, user: discord.Member
 async def globalblacklist(interaction: discord.Interaction, user: discord.Member):
     if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message("Only the bot owner can use this.", ephemeral=True)
+
     try:
         supabase.table("users").upsert({
             "discord_id": str(user.id),
@@ -332,11 +343,18 @@ async def globalblacklist(interaction: discord.Interaction, user: discord.Member
             "is_global": True,
             "server_id": None
         }).execute()
+
         try:
-            await user.send(f"You have been **globally blacklisted**.\n{LOGIN_URL}")
+            embed = discord.Embed(
+                title="🚫 You have been globally blacklisted",
+                description=f"You have been blacklisted from KingChat everywhere.\n\nLog in here:\n**{LOGIN_URL}**",
+                color=0xE74C3C
+            )
+            await user.send(embed=embed)
         except:
             pass
-        await interaction.response.send_message(f"✅ {user.mention} globally blacklisted.", ephemeral=True)
+
+        await interaction.response.send_message(f"✅ {user.mention} has been globally blacklisted.", ephemeral=True)
     except:
         await interaction.response.send_message("Failed.", ephemeral=True)
 
@@ -345,6 +363,7 @@ async def globalblacklist(interaction: discord.Interaction, user: discord.Member
 async def unblacklist(interaction: discord.Interaction, user: discord.Member):
     if not (interaction.user.guild_permissions.administrator or interaction.user.id == OWNER_ID):
         return await interaction.response.send_message("No permission.", ephemeral=True)
+
     try:
         supabase.table("users").update({
             "is_blacklisted": False,
@@ -355,21 +374,19 @@ async def unblacklist(interaction: discord.Interaction, user: discord.Member):
     except:
         await interaction.response.send_message("Failed.", ephemeral=True)
 
-# ================= MESSAGE HANDLER (SUPER HARD LOCK) =================
+# ================= MESSAGE HANDLER =================
 
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # ========== SUPER HARD LOCK ==========
-    if message.guild:
-        if not is_server_unlocked(message.guild.id):
-            if message.author.id != OWNER_ID:
-                return
-    # ====================================
+    # HARD LOCK
+    if message.guild and not is_server_unlocked(message.guild.id):
+        if message.author.id != OWNER_ID:
+            return
 
-    # Blacklist
+    # BLACKLIST CHECK
     guild_id = message.guild.id if message.guild else None
     if await is_blacklisted(message.author.id, guild_id):
         return
