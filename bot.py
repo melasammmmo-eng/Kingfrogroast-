@@ -302,7 +302,7 @@ async def points(interaction: discord.Interaction):
 
 @bot.tree.command(name="serverblacklist", description="Blacklist a user in this server only")
 @app_commands.describe(user="User to blacklist")
-async def serverblacklist(interaction: discord.Interaction, user: discord.Member):
+async def serverblacklist(interaction: discord.Interaction, user: discord.User):
     if not is_server_unlocked(interaction.guild.id):
         return await interaction.response.send_message("Server is locked.", ephemeral=True)
     if not (interaction.user.guild_permissions.administrator or interaction.user.id == OWNER_ID):
@@ -328,12 +328,13 @@ async def serverblacklist(interaction: discord.Interaction, user: discord.Member
             pass
 
         await interaction.response.send_message(f"✅ **{user}** has been blacklisted in this server.", ephemeral=True)
-    except:
+    except Exception as e:
+        print(e)
         await interaction.response.send_message("Failed.", ephemeral=True)
 
 @bot.tree.command(name="globalblacklist", description="Blacklist a user everywhere (Bot Owner only)")
 @app_commands.describe(user="User to blacklist globally")
-async def globalblacklist(interaction: discord.Interaction, user: discord.Member):
+async def globalblacklist(interaction: discord.Interaction, user: discord.User):
     if interaction.user.id != OWNER_ID:
         return await interaction.response.send_message("Only the bot owner can use this.", ephemeral=True)
 
@@ -370,7 +371,7 @@ async def globalblacklist(interaction: discord.Interaction, user: discord.Member
 
 @bot.tree.command(name="unblacklist", description="Remove blacklist")
 @app_commands.describe(user="User to unblacklist")
-async def unblacklist(interaction: discord.Interaction, user: discord.Member):
+async def unblacklist(interaction: discord.Interaction, user: discord.User):
     if not (interaction.user.guild_permissions.administrator or interaction.user.id == OWNER_ID):
         return await interaction.response.send_message("No permission.", ephemeral=True)
 
