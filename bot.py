@@ -19,7 +19,7 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OWNER_ID = int(os.getenv("OWNER_ID"))
-CLIENT_ID = os.getenv("CLIENT_ID")  # Add this to your .env
+CLIENT_ID = os.getenv("CLIENT_ID")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -276,7 +276,7 @@ async def stop(ctx):
         return
     toggles[str(ctx.guild.id)] = False
     save_memory()
-    await ctx.send("🛑 Bot stopped.")
+    await ctx.send("🛑 Bot stopped in this server.")
 
 @bot.command(name="start")
 async def start(ctx):
@@ -284,7 +284,23 @@ async def start(ctx):
         return
     toggles[str(ctx.guild.id)] = True
     save_memory()
-    await ctx.send("🟢 Bot started.")
+    await ctx.send("🟢 Bot started in this server.")
+
+@bot.tree.command(name="toggle", description="Turn the bot on or off in this server (Admins only)")
+@app_commands.checks.has_permissions(administrator=True)
+async def toggle(interaction: discord.Interaction):
+    if not is_server_unlocked(interaction.guild.id):
+        return await interaction.response.send_message("Server is still locked. Owner must log in first.", ephemeral=True)
+
+    guild_id = str(interaction.guild.id)
+    current = toggles.get(guild_id, True)
+    toggles[guild_id] = not current
+    save_memory()
+
+    if toggles[guild_id]:
+        await interaction.response.send_message("🟢 Bot is now **ON** in this server.", ephemeral=True)
+    else:
+        await interaction.response.send_message("🛑 Bot is now **OFF** in this server.", ephemeral=True)
 
 @bot.tree.command(name="setup", description="Setup AC Quest")
 @app_commands.checks.has_permissions(administrator=True)
@@ -336,6 +352,7 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="Admin Commands",
         value=(
+            "`/toggle` - Turn the bot on/off in this server\n"
             "`/setup` - Setup AC Quest roles & points\n"
             "`/serverblacklist` - Blacklist a user in this server\n"
             "`/unblacklist` - Remove a user from blacklist"
@@ -347,7 +364,7 @@ async def help_command(interaction: discord.Interaction):
         name="Owner Only",
         value=(
             "`/globalblacklist` - Blacklist a user everywhere\n"
-            "`!stop` / `!start` - Stop or start the bot in a server"
+            "`!stop` / `!start` - Stop or start the bot"
         ),
         inline=False
     )
@@ -458,10 +475,12 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # HARD LOCK
+    # ========== HARD LOCK ==========
     if message.guild and not is_server_unlocked(message.guild.id):
+        # Completely ignore everyone until the server is unlocked
         if message.author.id != OWNER_ID:
             return
+    # ===============================
 
     # BLACKLIST CHECK
     guild_id = message.guild.id if message.guild else None
