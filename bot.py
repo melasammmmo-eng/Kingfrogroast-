@@ -145,6 +145,7 @@ class ManualUnlockView(View):
 # ================= LOCK + BLACKLIST =================
 
 def is_server_unlocked(guild_id: int) -> bool:
+    # Force locked takes priority
     if force_locked.get(str(guild_id), False):
         return False
     return unlocked_servers.get(str(guild_id), False)
@@ -172,6 +173,7 @@ async def is_blacklisted(user_id: int, guild_id: int = None) -> bool:
 
 async def try_unlock_server(guild: discord.Guild):
     try:
+        # If force locked, only unlock if owner logs in again
         if force_locked.get(str(guild.id), False):
             if await has_logged_in(guild.owner_id):
                 force_locked[str(guild.id)] = False
@@ -338,7 +340,7 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     try:
         await bot.tree.sync()
-        bot.add_view(ManualUnlockView(0, "placeholder"))  # Register persistent view
+        bot.add_view(ManualUnlockView(0, "placeholder"))
         check_all_servers.start()
         for guild in bot.guilds:
             await try_unlock_server(guild)
@@ -378,8 +380,10 @@ async def unlock(ctx):
         force_locked[str(ctx.guild.id)] = False
         save_memory()
         await ctx.send("🔓 Server has been **unlocked** by the owner.")
+        print(f"✅ Unlocked server: {ctx.guild.name} ({ctx.guild.id})")
     except Exception as e:
         print("Unlock command error:", e)
+        await ctx.send("Failed to unlock the server.")
 
 @bot.command(name="lock")
 async def lock(ctx):
@@ -390,8 +394,10 @@ async def lock(ctx):
         force_locked[str(ctx.guild.id)] = True
         save_memory()
         await ctx.send("🔒 Server has been **locked**. The owner must log in again to unlock it.")
+        print(f"🔒 Locked server: {ctx.guild.name} ({ctx.guild.id})")
     except Exception as e:
         print("Lock command error:", e)
+        await ctx.send("Failed to lock the server.")
 
 @bot.tree.command(name="toggle", description="Turn the bot on or off in this server (Admins only)")
 @app_commands.checks.has_permissions(administrator=True)
