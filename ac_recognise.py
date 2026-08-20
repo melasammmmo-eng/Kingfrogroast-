@@ -15,7 +15,7 @@ Reply with only one of these:
 - NO - short reason
 """
         response = client.chat.completions.create(
-           model="llama-3.1-70b-versatile",
+           MODEL = "llama3-70b-8192" ,
             messages=[
                 {"role": "system", "content": "You are a strict proof checker for Animal Company quests."},
                 {"role": "user", "content": prompt}
