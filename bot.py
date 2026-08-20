@@ -27,7 +27,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-MODEL = "llama-3.1-70b-versatile"   # Working model
+MODEL = "llama3-70b-8192"
 LOGIN_URL = "https://kingchat-ten.vercel.app"
 
 MEMORY_FILE = "/app/data/memory.json"
