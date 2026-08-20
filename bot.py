@@ -145,7 +145,6 @@ class ManualUnlockView(View):
 # ================= LOCK + BLACKLIST =================
 
 def is_server_unlocked(guild_id: int) -> bool:
-    # Force locked takes priority
     if force_locked.get(str(guild_id), False):
         return False
     return unlocked_servers.get(str(guild_id), False)
@@ -157,6 +156,14 @@ async def has_logged_in(discord_id: int) -> bool:
     except Exception as e:
         print("Error checking login:", e)
         return False
+
+async def clear_user_login(discord_id: int):
+    """Remove the user from the users table so they must log in again."""
+    try:
+        supabase.table("users").delete().eq("discord_id", str(discord_id)).execute()
+        print(f"Cleared login for user {discord_id}")
+    except Exception as e:
+        print("Error clearing user login:", e)
 
 async def is_blacklisted(user_id: int, guild_id: int = None) -> bool:
     try:
@@ -173,7 +180,6 @@ async def is_blacklisted(user_id: int, guild_id: int = None) -> bool:
 
 async def try_unlock_server(guild: discord.Guild):
     try:
-        # If force locked, only unlock if owner logs in again
         if force_locked.get(str(guild.id), False):
             if await has_logged_in(guild.owner_id):
                 force_locked[str(guild.id)] = False
@@ -393,7 +399,31 @@ async def lock(ctx):
         unlocked_servers[str(ctx.guild.id)] = False
         force_locked[str(ctx.guild.id)] = True
         save_memory()
+
+        # Clear the server owner's login so they must log in again
+        await clear_user_login(ctx.guild.owner_id)
+
         await ctx.send("🔒 Server has been **locked**. The owner must log in again to unlock it.")
+
+        # Send the locked embed to the server owner
+        try:
+            owner = ctx.guild.owner or await bot.fetch_user(ctx.guild.owner_id)
+            embed = discord.Embed(
+                title="🔒 KingChat is Locked",
+                description=(
+                    f"The bot has been **locked** in **{ctx.guild.name}**.\n\n"
+                    f"To unlock it, log in with your Discord or Google account here:\n"
+                    f"**{LOGIN_URL}**\n\n"
+                    f"It will automatically unlock within 30 seconds after you log in.\n\n"
+                    f"If you can’t log in with Discord or Google, click the button below to request a **manual unlock**."
+                ),
+                color=0xE67E22
+            )
+            view = ManualUnlockView(ctx.guild.id, ctx.guild.name)
+            await owner.send(embed=embed, view=view)
+        except Exception as e:
+            print("Could not DM server owner on lock:", e)
+
         print(f"🔒 Locked server: {ctx.guild.name} ({ctx.guild.id})")
     except Exception as e:
         print("Lock command error:", e)
@@ -612,10 +642,12 @@ async def on_message(message: discord.Message):
         if message.author.bot:
             return
 
-        # ========== SUPER HARD LOCK ==========
+        # ========== HARD LOCK ==========
+        # Allow the OWNER to still use commands even when locked
         if message.guild and not is_server_unlocked(message.guild.id):
-            return
-        # =====================================
+            if message.author.id != OWNER_ID:
+                return
+        # ===============================
 
         # BLACKLIST CHECK
         guild_id = message.guild.id if message.guild else None
@@ -645,6 +677,10 @@ async def on_message(message: discord.Message):
             return
 
         await bot.process_commands(message)
+
+        # After processing commands, if server is still locked, don't talk
+        if not is_server_unlocked(message.guild.id):
+            return
 
         if not toggles.get(str(message.guild.id), True):
             return
