@@ -10,12 +10,10 @@ You are checking if a video/image proves the user completed this Animal Company 
 
 Challenge: {quest}
 
-Look at the media and decide if it shows the challenge being completed.
 Reply with only one of these:
 - YES
 - NO - short reason
 """
-
         response = client.chat.completions.create(
             model="llama-3.1-70b-versatile",
             messages=[
