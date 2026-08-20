@@ -1,6 +1,4 @@
 discord.py
-openai
-python-dotenv
-aiohttp
-supabase
 groq
+python-dotenv
+supabase
