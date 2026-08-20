@@ -123,8 +123,6 @@ Important:
 - If the conversation is about you or directed at you, keep engaging
 """
 
-# ================= MANUAL UNLOCK VIEW =================
-
 class ManualUnlockView(View):
     def __init__(self, guild_id: int, guild_name: str):
         super().__init__(timeout=None)
@@ -150,8 +148,6 @@ class ManualUnlockView(View):
         except Exception as e:
             print("Manual unlock request error:", e)
             await interaction.response.send_message("Failed to send request.", ephemeral=True)
-
-# ================= LOCK + BLACKLIST =================
 
 def is_server_unlocked(guild_id: int) -> bool:
     if force_locked.get(str(guild_id), False):
@@ -219,8 +215,6 @@ async def try_unlock_server(guild: discord.Guild):
 async def check_all_servers():
     for guild in bot.guilds:
         await try_unlock_server(guild)
-
-# ================= SETUP =================
 
 class PointsModal(Modal, title="Set Points Per Quest"):
     points_input = TextInput(label="How many points per quest?", placeholder="5", required=True)
@@ -306,8 +300,6 @@ class QuestStartView(View):
             return await interaction.response.send_message("Not your quest.", ephemeral=True)
         await interaction.response.edit_message(content="Okay.", embed=None, view=None)
 
-# ================= EVENTS =================
-
 @bot.event
 async def on_guild_join(guild: discord.Guild):
     try:
@@ -343,8 +335,6 @@ async def on_ready():
             await try_unlock_server(guild)
     except Exception as e:
         print("Error in on_ready:", e)
-
-# ================= COMMANDS =================
 
 @bot.command(name="stop")
 async def stop(ctx):
@@ -484,25 +474,20 @@ async def unblacklist(interaction: discord.Interaction, user: discord.User):
     except:
         await interaction.response.send_message("Failed.", ephemeral=True)
 
-# ================= MESSAGE HANDLER =================
-
 @bot.event
 async def on_message(message: discord.Message):
     try:
         if message.author.bot:
             return
 
-        # HARD LOCK - Owner can still use commands
         if message.guild and not is_server_unlocked(message.guild.id):
             if message.author.id != OWNER_ID:
                 return
 
-        # BLACKLIST
         guild_id = message.guild.id if message.guild else None
         if await is_blacklisted(message.author.id, guild_id):
             return
 
-        # Proof system
         if isinstance(message.channel, discord.DMChannel):
             user_id = str(message.author.id)
             if user_id in active_quests and message.attachments:
@@ -534,7 +519,6 @@ async def on_message(message: discord.Message):
         content = message.content.lower()
         channel_id = message.channel.id
 
-        # AC Quest
         if re.search(r"\bac\s*quest\b", content) and ac_enabled.get(str(message.guild.id), False):
             try:
                 view = QuestStartView(message.author.id, str(message.guild.id))
@@ -544,7 +528,6 @@ async def on_message(message: discord.Message):
                 await message.reply("I can't DM you.", mention_author=False)
             return
 
-        # Conversation logic
         is_mentioned = bot.user.mentioned_in(message) or "kingchat" in content or "king chat" in content
         is_active = channel_id in active_conversations
 
@@ -554,7 +537,6 @@ async def on_message(message: discord.Message):
 
         active_conversations[channel_id] = asyncio.get_event_loop().time()
 
-        # Clean old conversations (older than 3 minutes)
         current_time = asyncio.get_event_loop().time()
         to_remove = [cid for cid, ts in active_conversations.items() if current_time - ts > 180]
         for cid in to_remove:
