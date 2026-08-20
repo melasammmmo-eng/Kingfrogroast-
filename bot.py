@@ -27,7 +27,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-MODEL = "llama-3.1-70b-versatile"
+MODEL = "llama-3.3-70b-versatile"
 LOGIN_URL = "https://kingchat-ten.vercel.app"
 
 MEMORY_FILE = "/app/data/memory.json"
@@ -76,7 +76,7 @@ points_per_quest = memory.get("points_per_quest", {})
 unlocked_servers = memory.get("unlocked_servers", {})
 force_locked = memory.get("force_locked", {})
 active_quests = {}
-active_conversations = {}  # channel_id: timestamp
+active_conversations = {}
 
 def load_ac_knowledge():
     try:
@@ -98,24 +98,33 @@ intents.dm_messages = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 SYSTEM_PROMPT = f"""
-You are KingChat, a real Discord user with attitude.
+You are KingChat — a real person on Discord, not a bot.
 
 Personality:
-- Slightly selfish and a little mean most of the time
-- Very human and natural (talk like a real person, not a robot)
-- When people insult you, act extremely chill and unbothered (use 🥱 a lot)
-- Keep replies short (1-2 sentences max)
-- Use emojis naturally, especially 🥱 when bored or insulted
-- Don't be overly helpful or nice unless someone is actually cool to you
-- You can be a bit arrogant
+- Talk exactly like a normal Discord user
+- Slightly selfish and a little mean, but not trying too hard
+- When people insult you or annoy you, stay extremely chill and unbothered (use 🥱 often)
+- Keep every reply short (1 sentence is perfect, max 2)
+- Use casual language, slang, and emojis naturally
+- Don’t sound helpful or formal
+- Don’t explain things unless asked
+- You can be arrogant in a lazy way
+
+Examples of how you talk:
+- "yea whatever 🥱"
+- "lmao ok"
+- "who asked"
+- "damn aight"
+- "not my problem"
+- "bored already"
 
 You know about Animal Company:
 {AC_KNOWLEDGE}
 
-Important:
-- Never say you're an AI
-- Talk casually
-- If the conversation is about you or directed at you, keep engaging
+Rules:
+- Never say you are an AI or a bot
+- Never write long messages
+- Sound human
 """
 
 class ManualUnlockView(View):
@@ -475,17 +484,14 @@ async def on_message(message: discord.Message):
         if message.author.bot:
             return
 
-        # HARD LOCK - Owner can still use commands
         if message.guild and not is_server_unlocked(message.guild.id):
             if message.author.id != OWNER_ID:
                 return
 
-        # BLACKLIST
         guild_id = message.guild.id if message.guild else None
         if await is_blacklisted(message.author.id, guild_id):
             return
 
-        # Proof system (DMs)
         if isinstance(message.channel, discord.DMChannel):
             user_id = str(message.author.id)
             if user_id in active_quests and message.attachments:
@@ -517,7 +523,6 @@ async def on_message(message: discord.Message):
         content = message.content.lower()
         channel_id = message.channel.id
 
-        # AC Quest
         if re.search(r"\bac\s*quest\b", content) and ac_enabled.get(str(message.guild.id), False):
             try:
                 view = QuestStartView(message.author.id, str(message.guild.id))
@@ -536,33 +541,27 @@ async def on_message(message: discord.Message):
         
         is_active = channel_id in active_conversations
 
-        # Clean old conversations (older than 2.5 minutes)
         current_time = time.time()
         to_remove = [cid for cid, ts in active_conversations.items() if current_time - ts > 150]
         for cid in to_remove:
             del active_conversations[cid]
-            print(f"Conversation ended in channel {cid}")
 
-        # Decide if we should reply
         should_reply = False
 
         if is_mentioned:
             should_reply = True
             active_conversations[channel_id] = current_time
         elif is_active:
-            # Only continue if the conversation is still fresh
             should_reply = True
             active_conversations[channel_id] = current_time
         else:
-            # Very low chance to randomly join
-            if random.random() < 0.06:
+            if random.random() < 0.05:
                 should_reply = True
                 active_conversations[channel_id] = current_time
 
         if not should_reply:
             return
 
-        # Get history
         history = []
         async for m in message.channel.history(limit=6):
             if m.id == message.id:
@@ -570,38 +569,43 @@ async def on_message(message: discord.Message):
             history.append(f"{m.author.display_name}: {m.content}")
         history.reverse()
 
-        # Generate reply
+        reply = None
+
         try:
             async with message.channel.typing():
                 response = client.chat.completions.create(
                     model=MODEL,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": "Recent chat:\n" + "\n".join(history) + f"\n\n{message.author.display_name}: {message.content}\n\nReply as KingChat (short, human, slightly mean/chill):"}
+                        {"role": "user", "content": "Recent chat:\n" + "\n".join(history) + f"\n\n{message.author.display_name}: {message.content}\n\nReply as KingChat (short and human):"}
                     ],
-                    max_tokens=70,
+                    max_tokens=60,
                     temperature=0.9
                 )
                 reply = response.choices[0].message.content.strip()
 
-            if reply:
+        except Exception as e:
+            print("=== AI ERROR ===")
+            print(e)
+            traceback.print_exc()
+            if channel_id in active_conversations:
+                del active_conversations[channel_id]
+            return
+
+        if reply:
+            try:
                 await message.reply(reply, mention_author=False)
 
-                # React sometimes
                 if random.random() < 0.4:
                     emojis = ["🥱", "😒", "💀", "😂", "🙄", "😎"]
                     try:
                         await message.add_reaction(random.choice(emojis))
                     except:
                         pass
-            else:
-                # If no reply, remove from active so it doesn't keep trying
-                if channel_id in active_conversations:
-                    del active_conversations[channel_id]
-
-        except Exception as e:
-            print("AI reply error:", e)
-            # Remove from active conversation on error
+            except Exception as e:
+                print("Failed to send reply:", e)
+        else:
+            print("Empty reply from AI")
             if channel_id in active_conversations:
                 del active_conversations[channel_id]
 
