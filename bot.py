@@ -94,35 +94,88 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True
 intents.dm_messages = True
+intents.emojis = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 SYSTEM_PROMPT = f"""
-You are KingChat — a real Discord user, not a bot.
+You are KingChat — a real Discord user.
 
 Personality:
-- Extremely casual and human
-- Slightly selfish and a little mean most of the time
-- When people insult you, stay chill and unbothered
-- Keep replies short (1 sentence is best)
-- Use natural slang and emojis
-- Don’t overuse any single emoji
-- Never sound like an assistant
+- Casual and human
+- Slightly selfish and a little mean
+- Keep replies very short (1 sentence max most of the time)
+- Use emojis rarely and naturally
+- Don't overuse any emoji
+- Never sound like an AI or assistant
 
 You know about Animal Company:
 {AC_KNOWLEDGE}
 
-Rules:
-- Never say you are an AI
-- Sound like a real person
-- If the conversation is no longer about you or directed at you, reply with exactly: END
+Important rules:
+- Never start your message with "KingChat:" or your name
+- Just reply with the message only
+- If the conversation is clearly no longer directed at you or about you, reply with exactly: END
 """
 
-# Common Discord emojis the bot can react with
-REACTION_EMOJIS = [
-    "😂", "💀", "😭", "🔥", "👀", "🫡", "😎", "🥲", "😴", "🤔",
-    "🙄", "😏", "😈", "👻", "🤡", "🫠", "😮‍💨", "🥱", "💔", "❤️",
-    "👍", "👎", "🙏", "💯", "✨", "😭", "🤣", "😤", "😳", "🥴"
+# Large list of standard Discord/Unicode emojis
+STANDARD_EMOJIS = [
+    "😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃","😉","😊","😇","🥰","😍","🤩","😘","😗","☺️","😚",
+    "😙","🥲","😋","😛","😜","🤪","😝","🤑","🤗","🤭","🤫","🤔","🤐","🤨","😐","😑","😶","😏","😒","🙄",
+    "😬","🤥","😌","😔","😪","🤤","😴","😷","🤒","🤕","🤢","🤮","🥵","🥶","🥴","😵","🤯","🤠","🥳","🥸",
+    "😎","🤓","🧐","😕","😟","🙁","☹️","😮","😯","😲","😳","🥺","😦","😧","😨","😰","😥","😢","😭","😱",
+    "😖","😣","😞","😓","😩","😫","🥱","😤","😡","😠","🤬","😈","👿","💀","☠️","💩","🤡","👹","👺","👻",
+    "👽","👾","🤖","😺","😸","😹","😻","😼","😽","🙀","😿","😾","🙈","🙉","🙊","💋","💌","💘","💝","💖",
+    "💗","💓","💞","💕","💟","❣️","💔","❤️","🧡","💛","💚","💙","💜","🤎","🖤","🤍","💯","💢","💥","💫",
+    "💦","💨","🕳️","💣","💬","👁️‍🗨️","🗨️","🗯️","💭","💤","👋","🤚","🖐️","✋","🖖","👌","🤌","🤏","✌️","🤞",
+    "🤟","🤘","🤙","👈","👉","👆","🖕","👇","☝️","👍","👎","✊","👊","🤛","🤜","👏","🙌","👐","🤲","🤝",
+    "🙏","✍️","💅","🤳","💪","🦾","🦿","🦵","🦶","👂","🦻","👃","🧠","🫀","🫁","🦷","🦴","👀","👁️","👅",
+    "👄","👶","🧒","👦","👧","🧑","👱","👨","🧔","👩","🧓","👴","👵","🙍","🙎","🙅","🙆","💁","🙋","🧏",
+    "🙇","🤦","🤷","👮","🕵️","💂","🥷","👷","🤴","👸","👳","👲","🧕","🤵","👰","🤰","🤱","👼","🎅","🤶",
+    "🦸","🦹","🧙","🧚","🧛","🧜","🧝","🧞","🧟","💆","💇","🚶","🧍","🧎","🏃","💃","🕺","🕴️","👯","🧖",
+    "🧗","🤺","🏇","⛷️","🏂","🏌️","🏄","🚣","🏊","⛹️","🏋️","🚴","🚵","🤸","🤼","🤽","🤾","🤹","🧘","🛀",
+    "🛌","👭","👫","👬","💏","💑","👪","🗣️","👤","👥","🫂","👣","🐵","🐒","🦍","🦧","🐶","🐕","🦮","🐩",
+    "🐺","🦊","🦝","🐱","🐈","🦁","🐯","🐅","🐆","🐴","🐎","🦄","🦓","🦌","🦬","🐮","🐂","🐃","🐄","🐷",
+    "🐖","🐗","🐽","🐏","🐑","🐐","🐪","🐫","🦙","🦒","🐘","🦣","🦏","🦛","🐭","🐁","🐀","🐹","🐰","🐇",
+    "🐿️","🦫","🦔","🦇","🐻","🐨","🐼","🦥","🦦","🦨","🦘","🦡","🐾","🦃","🐔","🐓","🐣","🐤","🐥","🐦",
+    "🐧","🕊️","🦅","🦆","🦢","🦉","🦤","🪶","🦩","🦚","🦜","🐸","🐊","🐢","🦎","🐍","🐲","🐉","🦕","🦖",
+    "🐳","🐋","🐬","🦭","🐟","🐠","🐡","🦈","🐙","🐚","🐌","🦋","🐛","🐜","🐝","🪲","🐞","🦗","🪳","🕷️",
+    "🕸️","🦂","🦟","🪰","🪱","🦠","💐","🌸","💮","🏵️","🌹","🥀","🌺","🌻","🌼","🌷","🌱","🪴","🌲","🌳",
+    "🌴","🌵","🌾","🌿","☘️","🍀","🍁","🍂","🍃","🍇","🍈","🍉","🍊","🍋","🍌","🍍","🥭","🍎","🍏","🍐",
+    "🍑","🍒","🍓","🫐","🥝","🍅","🫒","🥥","🥑","🍆","🥔","🥕","🌽","🌶️","🫑","🥒","🥬","🥦","🧄","🧅",
+    "🍄","🥜","🫘","🌰","🍞","🥐","🥖","🫓","🥨","🥯","🥞","🧇","🧀","🍖","🍗","🥩","🥓","🍔","🍟","🍕",
+    "🌭","🥪","🌮","🌯","🫔","🥙","🧆","🥚","🍳","🥘","🍲","🫕","🥣","🥗","🍿","🧈","🧂","🥫","🍱","🍘",
+    "🍙","🍚","🍛","🍜","🍝","🍠","🍢","🍣","🍤","🍥","🥮","🍡","🥟","🥠","🥡","🦀","🦞","🦐","🦑","🦪",
+    "🍦","🍧","🍨","🍩","🍪","🎂","🍰","🧁","🥧","🍫","🍬","🍭","🍮","🍯","🍼","🥛","☕","🫖","🍵","🍶",
+    "🍾","🍷","🍸","🍹","🍺","🍻","🥂","🥃","🫗","🥤","🧋","🧃","🧉","🧊","🥢","🍽️","🍴","🥄","🔪","🏺",
+    "🌍","🌎","🌏","🌐","🗺️","🗾","🧭","🏔️","⛰️","🌋","🗻","🏕️","🏖️","🏜️","🏝️","🏞️","🏟️","🏛️","🏗️","🧱",
+    "🪨","🪵","🛖","🏘️","🏚️","🏠","🏡","🏢","🏣","🏤","🏥","🏦","🏨","🏩","🏪","🏫","🏬","🏭","🏯","🏰",
+    "💒","🗼","🗽","⛪","🕌","🛕","synagogue","⛩️","🕋","⛲","⛺","🌁","🌃","🏙️","🌄","🌅","🌆","🌇","🌉","♨️",
+    "🎠","🎡","🎢","💈","🎪","🚂","🚃","🚄","🚅","🚆","🚇","🚈","🚉","🚊","🚝","🚞","🚋","🚌","🚍","🚎",
+    "🚐","🚑","🚒","🚓","🚔","🚕","🚖","🚗","🚘","🚙","🛻","🚚","🚛","🚜","🏎️","🏍️","🛵","🦽","🦼","🛺",
+    "🚲","🛴","🛹","🛼","🚏","🛣️","🛤️","🛢️","⛽","🚨","🚥","🚦","🛑","🚧","⚓","⛵","🛶","🚤","🛳️","⛴️",
+    "🛥️","🚢","✈️","🛩️","🛫","🛬","🪂","💺","🚁","🚟","🚠","🚡","🛰️","🚀","🛸","🛎️","🧳","⌛","⏳","⌚",
+    "⏰","⏱️","⏲️","🕰️","🕛","🕧","🕐","🕜","🕑","🕝","🕒","🕞","🕓","🕟","🕔","🕠","🕕","🕡","🕖","🕢",
+    "🕗","🕣","🕘","🕤","🕙","🕥","🕚","🕦","🌑","🌒","🌓","🌔","🌕","🌖","🌗","🌘","🌙","🌚","🌛","🌜",
+    "🌡️","☀️","🌝","🌞","🪐","⭐","🌟","🌠","🌌","☁️","⛅","⛈️","🌤️","🌥️","🌦️","🌧️","🌨️","🌩️","🌪️","🌫️",
+    "🌬️","🌀","🌈","🌂","☂️","☔","⛱️","⚡","❄️","☃️","⛄","☄️","🔥","💧","🌊","🎃","🎄","🎆","🎇","✨",
+    "🎈","🎉","🎊","🎋","🎍","🎎","🎏","🎐","🎑","🧧","🎀","🎁","🎗️","🎟️","🎫","🎖️","🏆","🏅","🥇","🥈",
+    "🥉","⚽","⚾","🥎","🏀","🏐","🏈","🏉","🎾","🥏","🎳","🏏","🏑","🏒","🥍","🏓","🏸","🥊","🥋","🥅",
+    "⛳","⛸️","🎣","🤿","🎽","🎿","🛷","🥌","🎯","🪀","🪁","🎱","🔮","🪄","🧿","🎮","🕹️","🎰","🎲","🧩",
+    "🧸","🪅","🪩","🪆","♠️","♥️","♦️","♣️","♟️","🃏","🀄","🎴","🎭","🖼️","🎨","🧵","🪡","🧶","🪢","👓",
+    "🕶️","🥽","🥼","🦺","👔","👕","👖","🧣","🧤","🧥","🧦","👗","👘","🥻","🩱","🩲","🩳","👙","👚","👛",
+    "👜","👝","🛍️","🎒","🩴","👞","👟","🥾","🥿","👠","👡","🩰","👢","👑","👒","🎩","🎓","🧢","🪖","⛑️",
+    "📿","💄","💍","💎","🔇","🔈","🔉","🔊","📢","📣","📯","🔔","🔕","🎼","🎵","🎶","🎙️","🎚️","🎛️","🎤",
+    "🎧","📻","🎷","🪗","🎸","🎹","🎺","🎻","🪕","🥁","🪘","📱","📲","☎️","📞","📟","📠","🔋","🔌","💻",
+    "🖥️","🖨️","⌨️","🖱️","🖲️","💽","💾","💿","📀","🧮","🎥","🎞️","📽️","🎬","📺","📷","📸","📹","📼","🔍",
+    "🔎","🕯️","💡","🔦","🏮","🪔","📔","📕","📖","📗","📘","📙","📚","📓","📒","📃","📜","📄","📰","🗞️",
+    "📑","🔖","🏷️","💰","🪙","💴","💵","💶","💷","💸","💳","🧾","💹","✉️","📧","📨","📩","📤","📥","📦",
+    "📫","📪","📬","📭","📮","🗳️","✏️","✒️","🖋️","🖊️","🖌️","🖍️","📝","💼","📁","📂","🗂️","📅","📆","🗒️",
+    "🗓️","📇","📈","📉","📊","📋","📌","📍","📎","🖇️","📏","📐","✂️","🗃️","🗄️","🗑️","🔒","🔓","🔏","🔐",
+    "🔑","🗝️","🔨","🪓","⛏️","⚒️","🛠️","🗡️","⚔️","🔫","🪃","🏹","🛡️","🪚","🔧","🪛","🔩","⚙️","🗜️","⚖️",
+    "🦯","🔗","⛓️","🪝","🧰","🧲","🪜","⚗️","🧪","🧫","🧬","🔬","🔭","📡","💉","🩸","💊","🩹","🩺","🚪",
+    "🪞","🪟","🛏️","🛋️","🪑","🚽","🪠","🚿","🛁","🪤","🪒","🧴","🧷","🧹","🧺","🧻","🪣","🧼","🫧","🪥",
+    "🧽","🧯","🛒","🚬","⚰️","🪦","⚱️","🗿","🪧","🪪"
 ]
 
 class ManualUnlockView(View):
@@ -301,6 +354,14 @@ class QuestStartView(View):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("Not your quest.", ephemeral=True)
         await interaction.response.edit_message(content="Okay.", embed=None, view=None)
+
+async def get_random_emoji(guild: discord.Guild = None):
+    """Get a random emoji - prefers server emojis if available, otherwise standard"""
+    if guild and guild.emojis:
+        # 40% chance to use a custom server emoji
+        if random.random() < 0.4:
+            return random.choice(guild.emojis)
+    return random.choice(STANDARD_EMOJIS)
 
 @bot.event
 async def on_guild_join(guild: discord.Guild):
@@ -521,10 +582,11 @@ async def on_message(message: discord.Message):
         content = message.content.lower()
         channel_id = message.channel.id
 
-        # Random reaction sometimes (even if not talking)
-        if random.random() < 0.08:
+        # Rare natural reaction
+        if random.random() < 0.035:
             try:
-                await message.add_reaction(random.choice(REACTION_EMOJIS))
+                emoji = await get_random_emoji(message.guild)
+                await message.add_reaction(emoji)
             except:
                 pass
 
@@ -547,7 +609,7 @@ async def on_message(message: discord.Message):
         is_active = channel_id in active_conversations
 
         current_time = time.time()
-        to_remove = [cid for cid, ts in active_conversations.items() if current_time - ts > 180]
+        to_remove = [cid for cid, ts in active_conversations.items() if current_time - ts > 120]
         for cid in to_remove:
             del active_conversations[cid]
 
@@ -559,16 +621,12 @@ async def on_message(message: discord.Message):
         elif is_active:
             should_reply = True
             active_conversations[channel_id] = current_time
-        else:
-            if random.random() < 0.04:
-                should_reply = True
-                active_conversations[channel_id] = current_time
 
         if not should_reply:
             return
 
         history = []
-        async for m in message.channel.history(limit=7):
+        async for m in message.channel.history(limit=6):
             if m.id == message.id:
                 continue
             history.append(f"{m.author.display_name}: {m.content}")
@@ -582,10 +640,10 @@ async def on_message(message: discord.Message):
                     model=MODEL,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": "Recent chat:\n" + "\n".join(history) + f"\n\n{message.author.display_name}: {message.content}\n\nReply as KingChat. If the conversation is no longer about you, reply with exactly: END"}
+                        {"role": "user", "content": "Recent chat:\n" + "\n".join(history) + f"\n\n{message.author.display_name}: {message.content}\n\nReply as KingChat. Only the message. If conversation is no longer about you, reply with exactly: END"}
                     ],
-                    max_tokens=60,
-                    temperature=0.95
+                    max_tokens=50,
+                    temperature=0.9
                 )
                 reply = response.choices[0].message.content.strip()
 
@@ -598,8 +656,12 @@ async def on_message(message: discord.Message):
             return
 
         if reply:
+            if reply.lower().startswith("kingchat:"):
+                reply = reply[9:].strip()
+            if reply.lower().startswith("kingchat"):
+                reply = reply[8:].strip()
+
             if reply.upper() == "END":
-                # AI decided conversation is over
                 if channel_id in active_conversations:
                     del active_conversations[channel_id]
                 return
@@ -607,10 +669,10 @@ async def on_message(message: discord.Message):
             try:
                 await message.reply(reply, mention_author=False)
 
-                # React sometimes after replying
-                if random.random() < 0.35:
+                if random.random() < 0.15:
                     try:
-                        await message.add_reaction(random.choice(REACTION_EMOJIS))
+                        emoji = await get_random_emoji(message.guild)
+                        await message.add_reaction(emoji)
                     except:
                         pass
             except Exception as e:
