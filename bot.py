@@ -104,7 +104,7 @@ You are KingChat — a real Discord user.
 Personality:
 - Casual and human
 - When people are nice → be chill or slightly nice
-- When people are rude → be rude back, but smart and natural (not try-hard)
+- When people are rude → be rude back, but smart and natural
 - Keep replies very short
 - Don't force Animal Company into the conversation
 - Never sound like an AI
@@ -546,7 +546,6 @@ async def on_message(message: discord.Message):
 
         current_time = time.time()
 
-        # Clean old conversations (after 90 seconds of silence)
         to_remove = [cid for cid, ts in active_conversations.items() if current_time - ts > 90]
         for cid in to_remove:
             del active_conversations[cid]
@@ -559,12 +558,10 @@ async def on_message(message: discord.Message):
             should_reply = True
             active_conversations[channel_id] = current_time
         elif is_active:
-            # More precise: only continue if message seems directed at the bot
             if len(message.content) < 120 or any(word in content for word in ["you", "u", "ur", "your", "king", "chat", "bro", "dude", "lol", "lmao", "wtf", "fr"]):
                 should_reply = True
                 active_conversations[channel_id] = current_time
             else:
-                # Conversation moved on
                 del active_conversations[channel_id]
                 return
 
@@ -594,13 +591,15 @@ async def on_message(message: discord.Message):
                 )
                 full_reply = response.choices[0].message.content.strip()
 
-            lines = [line.strip() for line in full_reply.splitlines() if line.strip()]
-
-            for line in lines:
-                if line.upper().startswith("REACT:"):
-                    react_emoji = line.split(":", 1)[1].strip()
-                elif line.upper() != "END":
-                    reply = line
+            # ========== STRONG REACT PARSING ==========
+            # This will catch REACT: no matter where it is
+            match = re.search(r"REACT:\s*(\S+)", full_reply, re.IGNORECASE)
+            if match:
+                react_emoji = match.group(1).strip()
+                # Remove the REACT: part from the text
+                reply = re.sub(r"REACT:\s*\S+", "", full_reply, flags=re.IGNORECASE).strip()
+            else:
+                reply = full_reply.strip()
 
             if full_reply.upper().strip() == "END" or (not reply and not react_emoji):
                 if channel_id in active_conversations:
@@ -615,6 +614,7 @@ async def on_message(message: discord.Message):
                 del active_conversations[channel_id]
             return
 
+        # Clean name prefix
         if reply:
             if reply.lower().startswith("kingchat:"):
                 reply = reply[9:].strip()
