@@ -537,19 +537,21 @@ async def on_message(message: discord.Message):
                 await message.reply("I can't DM you.", mention_author=False)
             return
 
-        # ===== TALKING SYSTEM =====
+        # ===== PRECISE TALKING SYSTEM =====
         is_mentioned = (
             bot.user.mentioned_in(message) or 
             "kingchat" in content or 
             "king chat" in content
         )
-        
-        is_active = channel_id in active_conversations
 
         current_time = time.time()
-        to_remove = [cid for cid, ts in active_conversations.items() if current_time - ts > 120]
+
+        # Clean old conversations (after 90 seconds of silence)
+        to_remove = [cid for cid, ts in active_conversations.items() if current_time - ts > 90]
         for cid in to_remove:
             del active_conversations[cid]
+
+        is_active = channel_id in active_conversations
 
         should_reply = False
 
@@ -557,14 +559,20 @@ async def on_message(message: discord.Message):
             should_reply = True
             active_conversations[channel_id] = current_time
         elif is_active:
-            should_reply = True
-            active_conversations[channel_id] = current_time
+            # More precise: only continue if message seems directed at the bot
+            if len(message.content) < 120 or any(word in content for word in ["you", "u", "ur", "your", "king", "chat", "bro", "dude", "lol", "lmao", "wtf", "fr"]):
+                should_reply = True
+                active_conversations[channel_id] = current_time
+            else:
+                # Conversation moved on
+                del active_conversations[channel_id]
+                return
 
         if not should_reply:
             return
 
         history = []
-        async for m in message.channel.history(limit=6):
+        async for m in message.channel.history(limit=5):
             if m.id == message.id:
                 continue
             history.append(f"{m.author.display_name}: {m.content}")
@@ -581,8 +589,8 @@ async def on_message(message: discord.Message):
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": "Recent chat:\n" + "\n".join(history) + f"\n\n{message.author.display_name}: {message.content}\n\nReply as KingChat:"}
                     ],
-                    max_tokens=60,
-                    temperature=0.9
+                    max_tokens=50,
+                    temperature=0.85
                 )
                 full_reply = response.choices[0].message.content.strip()
 
@@ -594,7 +602,7 @@ async def on_message(message: discord.Message):
                 elif line.upper() != "END":
                     reply = line
 
-            if full_reply.upper().strip() == "END":
+            if full_reply.upper().strip() == "END" or (not reply and not react_emoji):
                 if channel_id in active_conversations:
                     del active_conversations[channel_id]
                 return
@@ -607,7 +615,6 @@ async def on_message(message: discord.Message):
                 del active_conversations[channel_id]
             return
 
-        # Clean name prefix if it appears
         if reply:
             if reply.lower().startswith("kingchat:"):
                 reply = reply[9:].strip()
@@ -615,16 +622,15 @@ async def on_message(message: discord.Message):
                 reply = reply[8:].strip()
 
         try:
-            # Case 1: Only reaction (no text)
+            # Only reaction
             if react_emoji and not reply:
                 await message.add_reaction(react_emoji)
                 return
 
-            # Case 2: Text reply
+            # Text reply
             if reply:
                 await message.reply(reply, mention_author=False)
 
-                # Optional reaction with the reply
                 if react_emoji:
                     try:
                         await message.add_reaction(react_emoji)
