@@ -27,7 +27,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-MODEL = "gpt-4o-mini"  # Good balance of quality + cost
+MODEL = "gpt-4o-mini"
 LOGIN_URL = "https://kingchat-ten.vercel.app"
 
 MEMORY_FILE = "/app/data/memory.json"
@@ -100,32 +100,30 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 SYSTEM_PROMPT = f"""
 You are KingChat — a real Discord user, not a bot.
 
-How you talk:
+Personality:
 - Extremely casual and human
 - Slightly selfish and a little mean most of the time
-- When people insult you or try to get a reaction, stay super chill and unbothered (use 🥱 a lot)
-- Keep replies very short (usually 1 sentence)
-- Use slang, lowercase, and natural typos sometimes
-- Never sound helpful, formal, or like an assistant
-- You can be lazy and arrogant
-
-Examples of how you reply:
-- "yea whatever 🥱"
-- "lmao who asked"
-- "ok and?"
-- "not my problem"
-- "bored already"
-- "damn aight"
-- "cry about it"
+- When people insult you, stay chill and unbothered
+- Keep replies short (1 sentence is best)
+- Use natural slang and emojis
+- Don’t overuse any single emoji
+- Never sound like an assistant
 
 You know about Animal Company:
 {AC_KNOWLEDGE}
 
 Rules:
-- Never say you are an AI or a bot
-- Never write long paragraphs
-- Sound like a real person on Discord
+- Never say you are an AI
+- Sound like a real person
+- If the conversation is no longer about you or directed at you, reply with exactly: END
 """
+
+# Common Discord emojis the bot can react with
+REACTION_EMOJIS = [
+    "😂", "💀", "😭", "🔥", "👀", "🫡", "😎", "🥲", "😴", "🤔",
+    "🙄", "😏", "😈", "👻", "🤡", "🫠", "😮‍💨", "🥱", "💔", "❤️",
+    "👍", "👎", "🙏", "💯", "✨", "😭", "🤣", "😤", "😳", "🥴"
+]
 
 class ManualUnlockView(View):
     def __init__(self, guild_id: int, guild_name: str):
@@ -523,6 +521,13 @@ async def on_message(message: discord.Message):
         content = message.content.lower()
         channel_id = message.channel.id
 
+        # Random reaction sometimes (even if not talking)
+        if random.random() < 0.08:
+            try:
+                await message.add_reaction(random.choice(REACTION_EMOJIS))
+            except:
+                pass
+
         if re.search(r"\bac\s*quest\b", content) and ac_enabled.get(str(message.guild.id), False):
             try:
                 view = QuestStartView(message.author.id, str(message.guild.id))
@@ -542,7 +547,7 @@ async def on_message(message: discord.Message):
         is_active = channel_id in active_conversations
 
         current_time = time.time()
-        to_remove = [cid for cid, ts in active_conversations.items() if current_time - ts > 150]
+        to_remove = [cid for cid, ts in active_conversations.items() if current_time - ts > 180]
         for cid in to_remove:
             del active_conversations[cid]
 
@@ -555,7 +560,7 @@ async def on_message(message: discord.Message):
             should_reply = True
             active_conversations[channel_id] = current_time
         else:
-            if random.random() < 0.05:
+            if random.random() < 0.04:
                 should_reply = True
                 active_conversations[channel_id] = current_time
 
@@ -563,7 +568,7 @@ async def on_message(message: discord.Message):
             return
 
         history = []
-        async for m in message.channel.history(limit=6):
+        async for m in message.channel.history(limit=7):
             if m.id == message.id:
                 continue
             history.append(f"{m.author.display_name}: {m.content}")
@@ -577,7 +582,7 @@ async def on_message(message: discord.Message):
                     model=MODEL,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": "Recent chat:\n" + "\n".join(history) + f"\n\n{message.author.display_name}: {message.content}\n\nReply as KingChat (short and human):"}
+                        {"role": "user", "content": "Recent chat:\n" + "\n".join(history) + f"\n\n{message.author.display_name}: {message.content}\n\nReply as KingChat. If the conversation is no longer about you, reply with exactly: END"}
                     ],
                     max_tokens=60,
                     temperature=0.95
@@ -593,19 +598,24 @@ async def on_message(message: discord.Message):
             return
 
         if reply:
+            if reply.upper() == "END":
+                # AI decided conversation is over
+                if channel_id in active_conversations:
+                    del active_conversations[channel_id]
+                return
+
             try:
                 await message.reply(reply, mention_author=False)
 
-                if random.random() < 0.4:
-                    emojis = ["🥱", "😒", "💀", "😂", "🙄", "😎"]
+                # React sometimes after replying
+                if random.random() < 0.35:
                     try:
-                        await message.add_reaction(random.choice(emojis))
+                        await message.add_reaction(random.choice(REACTION_EMOJIS))
                     except:
                         pass
             except Exception as e:
                 print("Failed to send reply:", e)
         else:
-            print("Empty reply from AI")
             if channel_id in active_conversations:
                 del active_conversations[channel_id]
 
