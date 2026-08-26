@@ -9,7 +9,7 @@ import time
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from discord.ui import View, Button, Modal, TextInput, RoleSelect
+from discord.ui import View, Button, Modal, TextInput, RoleSelect, ChannelSelect
 from openai import OpenAI
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -30,11 +30,10 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 MODEL = "gpt-4o-mini"
 LOGIN_URL = "https://kingchat-ten.vercel.app"
 
-MEMORY_FILE = "/app/data/memory.json"
+MEMORY_FILE = "memory.json"
 
 def load_memory():
     try:
-        os.makedirs("/app/data", exist_ok=True)
         if os.path.exists(MEMORY_FILE):
             with open(MEMORY_FILE, "r") as f:
                 return json.load(f)
@@ -47,12 +46,12 @@ def load_memory():
         "role_configs": {},
         "points_per_quest": {},
         "unlocked_servers": {},
-        "force_locked": {}
+        "force_locked": {},
+        "allowed_channels": {}
     }
 
 def save_memory():
     try:
-        os.makedirs("/app/data", exist_ok=True)
         data = {
             "toggles": toggles,
             "ac_enabled": ac_enabled,
@@ -60,7 +59,8 @@ def save_memory():
             "role_configs": role_configs,
             "points_per_quest": points_per_quest,
             "unlocked_servers": unlocked_servers,
-            "force_locked": force_locked
+            "force_locked": force_locked,
+            "allowed_channels": allowed_channels
         }
         with open(MEMORY_FILE, "w") as f:
             json.dump(data, f, indent=2)
@@ -75,6 +75,7 @@ role_configs = memory.get("role_configs", {})
 points_per_quest = memory.get("points_per_quest", {})
 unlocked_servers = memory.get("unlocked_servers", {})
 force_locked = memory.get("force_locked", {})
+allowed_channels = memory.get("allowed_channels", {})  # {guild_id: [channel_id, ...]}
 active_quests = {}
 active_conversations = {}
 
@@ -162,6 +163,13 @@ def is_server_unlocked(guild_id: int) -> bool:
     if force_locked.get(str(guild_id), False):
         return False
     return unlocked_servers.get(str(guild_id), False)
+
+def is_channel_allowed(guild_id: int, channel_id: int) -> bool:
+    guild_key = str(guild_id)
+    # If no channels have been set yet, allow all channels
+    if guild_key not in allowed_channels or not allowed_channels[guild_key]:
+        return True
+    return str(channel_id) in allowed_channels[guild_key]
 
 async def has_logged_in(discord_id: int) -> bool:
     try:
@@ -272,6 +280,31 @@ class SetupView(View):
         level = int(select.values[0])
         view = LevelRoleView(self.guild_id, level)
         await interaction.response.send_message(f"Select role for **Level {level}**:", view=view, ephemeral=True)
+
+class ChannelSelectView(View):
+    def __init__(self, guild_id: str):
+        super().__init__(timeout=180)
+        self.guild_id = guild_id
+
+    @discord.ui.select(
+        cls=ChannelSelect,
+        channel_types=[discord.ChannelType.text],
+        placeholder="Select channels KingChat can talk in...",
+        min_values=0,
+        max_values=25
+    )
+    async def select_channels(self, interaction: discord.Interaction, select: ChannelSelect):
+        selected = [str(c.id) for c in select.values]
+        allowed_channels[self.guild_id] = selected
+        save_memory()
+
+        if not selected:
+            msg = "✅ KingChat can now talk in **all channels**."
+        else:
+            mentions = ", ".join(f"<#{cid}>" for cid in selected)
+            msg = f"✅ KingChat can now only talk in:\n{mentions}"
+
+        await interaction.response.edit_message(content=msg, view=None)
 
 class QuestStartView(View):
     def __init__(self, user_id, guild_id):
@@ -396,6 +429,28 @@ async def lock(ctx):
     except:
         pass
 
+@bot.command(name="globalshutdownpaskey8048")
+async def global_shutdown(ctx):
+    if ctx.author.id != OWNER_ID:
+        return
+    await ctx.send("🛑 Shutting down KingChat...")
+    print("Bot is shutting down by owner command.")
+    await bot.close()
+
+@bot.tree.command(name="setchannels", description="Choose which channels KingChat can talk in (Admins only)")
+@app_commands.checks.has_permissions(administrator=True)
+async def setchannels(interaction: discord.Interaction):
+    if not is_server_unlocked(interaction.guild.id):
+        return await interaction.response.send_message("Server is locked.", ephemeral=True)
+
+    view = ChannelSelectView(str(interaction.guild.id))
+    embed = discord.Embed(
+        title="📢 Channel Permissions",
+        description="Select the channels where KingChat is allowed to talk.\n\nLeave empty = allowed in **all** channels.",
+        color=0x3498DB
+    )
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 @bot.tree.command(name="toggle", description="Turn the bot on or off (Admins only)")
 @app_commands.checks.has_permissions(administrator=True)
 async def toggle(interaction: discord.Interaction):
@@ -432,7 +487,7 @@ async def invite(interaction: discord.Interaction):
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="KingChat Help", color=0x1E90FF)
     embed.add_field(name="General", value="`/help` `/invite` `/points`", inline=False)
-    embed.add_field(name="Admin", value="`/toggle` `/setup` `/serverblacklist` `/unblacklist`", inline=False)
+    embed.add_field(name="Admin", value="`/toggle` `/setup` `/setchannels` `/serverblacklist` `/unblacklist`", inline=False)
     embed.add_field(name="Owner Only", value="`!unlock` `!lock` `!stop` `!start` `/globalblacklist`", inline=False)
     embed.set_footer(text="KingChat • Made by KingFrog")
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -525,6 +580,10 @@ async def on_message(message: discord.Message):
         if not toggles.get(str(message.guild.id), True):
             return
 
+        # NEW: Channel restriction check
+        if not is_channel_allowed(message.guild.id, message.channel.id):
+            return
+
         content = message.content.lower()
         channel_id = message.channel.id
 
@@ -591,12 +650,9 @@ async def on_message(message: discord.Message):
                 )
                 full_reply = response.choices[0].message.content.strip()
 
-            # ========== STRONG REACT PARSING ==========
-            # This will catch REACT: no matter where it is
             match = re.search(r"REACT:\s*(\S+)", full_reply, re.IGNORECASE)
             if match:
                 react_emoji = match.group(1).strip()
-                # Remove the REACT: part from the text
                 reply = re.sub(r"REACT:\s*\S+", "", full_reply, flags=re.IGNORECASE).strip()
             else:
                 reply = full_reply.strip()
@@ -614,7 +670,6 @@ async def on_message(message: discord.Message):
                 del active_conversations[channel_id]
             return
 
-        # Clean name prefix
         if reply:
             if reply.lower().startswith("kingchat:"):
                 reply = reply[9:].strip()
@@ -622,12 +677,10 @@ async def on_message(message: discord.Message):
                 reply = reply[8:].strip()
 
         try:
-            # Only reaction
             if react_emoji and not reply:
                 await message.add_reaction(react_emoji)
                 return
 
-            # Text reply
             if reply:
                 await message.reply(reply, mention_author=False)
 
